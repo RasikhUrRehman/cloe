@@ -6,7 +6,7 @@ import random
 import time
 from typing import Dict, Any, Optional
 from datetime import datetime
-from utils import setup_logging, get_current_timestamp
+from chatbot.utils.utils import setup_logging, get_current_timestamp
 
 logger = setup_logging()
 

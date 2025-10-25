@@ -8,8 +8,8 @@ from typing import Optional, Dict, Any, List
 from datetime import datetime
 from enum import Enum
 from pydantic import BaseModel, Field
-from config import settings
-from utils import setup_logging, generate_session_id, get_current_timestamp
+from chatbot.utils.config import settings
+from chatbot.utils.utils import setup_logging, generate_session_id, get_current_timestamp
 
 logger = setup_logging()
 
@@ -274,7 +274,7 @@ class StateManager:
 
 def main():
     """Example usage of state management"""
-    from config import ensure_directories
+    from chatbot.utils.config import ensure_directories
     ensure_directories()
     
     manager = StateManager()

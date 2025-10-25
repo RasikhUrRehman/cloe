@@ -4,9 +4,9 @@ Calculates candidate fit score based on qualification, experience, and verificat
 """
 from typing import Dict, Any, Optional
 from dataclasses import dataclass
-from config import settings
-from states import QualificationState, ApplicationState, VerificationState
-from utils import setup_logging
+from chatbot.utils.config import settings
+from chatbot.state.states import QualificationState, ApplicationState, VerificationState
+from chatbot.utils.utils import setup_logging
 
 logger = setup_logging()
 
@@ -319,7 +319,7 @@ class FitScoreCalculator:
 
 def main():
     """Example usage of fit score calculator"""
-    from states import QualificationState, ApplicationState, VerificationState
+    from chatbot.state.states import QualificationState, ApplicationState, VerificationState
     
     # Create sample states
     qualification = QualificationState(

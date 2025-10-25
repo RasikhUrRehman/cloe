@@ -3,8 +3,8 @@ Setup Knowledge Base
 Initializes Milvus collection and ingests sample documents
 """
 from ingestion import DocumentIngestion
-from config import ensure_directories
-from utils import setup_logging
+from chatbot.utils.config import ensure_directories
+from chatbot.utils.utils import setup_logging
 import os
 
 logger = setup_logging()

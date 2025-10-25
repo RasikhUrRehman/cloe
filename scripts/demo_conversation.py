@@ -2,11 +2,11 @@
 Demo Conversation Script
 Demonstrates end-to-end Cleo RAG Agent interaction
 """
-from agent import CleoRAGAgent
-from states import ConversationStage
-from report_generator import ReportGenerator
-from config import ensure_directories
-from utils import setup_logging
+from chatbot.core.agent import CleoRAGAgent
+from chatbot.state.states import ConversationStage
+from chatbot.utils.report_generator import ReportGenerator
+from chatbot.utils.config import ensure_directories
+from chatbot.utils.utils import setup_logging
 import time
 
 logger = setup_logging()
@@ -103,8 +103,8 @@ def simulate_conversation():
     
     # Manually complete verification for demo purposes
     print_separator("Completing Verification (Simulated)")
-    from states import VerificationState
-    from utils import get_current_timestamp
+    from chatbot.state.states import VerificationState
+    from chatbot.utils.utils import get_current_timestamp
     
     verification = VerificationState(
         session_id=agent.session_state.session_id,
@@ -172,7 +172,7 @@ def demo_retrieval():
     print_separator("Knowledge Base Retrieval Demo")
     
     try:
-        from retrievers import KnowledgeBaseRetriever, RetrievalMethod
+        from chatbot.core.retrievers import KnowledgeBaseRetriever, RetrievalMethod
         
         retriever = KnowledgeBaseRetriever()
         

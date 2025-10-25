@@ -6,8 +6,8 @@ from typing import List, Dict, Any, Optional
 from enum import Enum
 from langchain_openai import OpenAIEmbeddings
 from pymilvus import Collection, connections
-from config import settings
-from utils import setup_logging
+from chatbot.utils.config import settings
+from chatbot.utils.utils import setup_logging
 
 logger = setup_logging()
 

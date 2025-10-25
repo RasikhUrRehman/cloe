@@ -49,7 +49,7 @@ def test_environment_file() -> Tuple[bool, str]:
 def test_openai_api_key() -> Tuple[bool, str]:
     """Test if OpenAI API key is configured"""
     try:
-        from config import settings
+        from chatbot.utils.config import settings
         if settings.OPENAI_API_KEY and settings.OPENAI_API_KEY != "your_openai_api_key_here":
             return True, "OpenAI API key configured"
         return False, "OpenAI API key not configured in .env"
@@ -61,7 +61,7 @@ def test_milvus_connection() -> Tuple[bool, str]:
     """Test Milvus connection"""
     try:
         from pymilvus import connections, utility
-        from config import settings
+        from chatbot.utils.config import settings
         
         connections.connect(
             alias="test",
@@ -123,7 +123,7 @@ def test_knowledge_base() -> Tuple[bool, str]:
     """Test if knowledge base collection exists"""
     try:
         from pymilvus import connections, utility
-        from config import settings
+        from chatbot.utils.config import settings
         
         connections.connect(
             alias="test",
@@ -221,7 +221,7 @@ def run_all_tests():
         print("    • Install dependencies: pip install -r requirements.txt")
         print("    • Create .env file: cp .env.example .env")
         print("    • Add OpenAI API key to .env file")
-        print("    • Create directories: python -c 'from config import ensure_directories; ensure_directories()'")
+        print("    • Create directories: python -c 'from chatbot.utils.config import ensure_directories; ensure_directories()'")
     
     print("\n" + "="*70 + "\n")
     

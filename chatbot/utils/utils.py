@@ -3,7 +3,7 @@ Utilities for logging and common functions
 """
 import sys
 from loguru import logger
-from config import settings
+from chatbot.utils.config import settings
 
 
 def setup_logging():

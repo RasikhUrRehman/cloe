@@ -8,8 +8,8 @@ import fitz  # PyMuPDF
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
 from pymilvus import connections, Collection, FieldSchema, CollectionSchema, DataType, utility
-from config import settings
-from utils import setup_logging
+from chatbot.utils.config import settings
+from chatbot.utils.utils import setup_logging
 
 logger = setup_logging()
 
@@ -235,7 +235,7 @@ class DocumentIngestion:
 
 def main():
     """Example usage of document ingestion"""
-    from config import ensure_directories
+    from chatbot.utils.config import ensure_directories
     
     # Ensure directories exist
     ensure_directories()

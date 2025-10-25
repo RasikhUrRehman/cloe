@@ -11,10 +11,10 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib import colors
-from states import SessionState, StateManager
-from fit_score import FitScoreCalculator, FitScoreComponents
-from config import settings
-from utils import setup_logging
+from chatbot.state.states import SessionState, StateManager
+from chatbot.utils.fit_score import FitScoreCalculator, FitScoreComponents
+from chatbot.utils.config import settings
+from chatbot.utils.utils import setup_logging
 
 logger = setup_logging()
 
@@ -313,8 +313,8 @@ class ReportGenerator:
 
 def main():
     """Example usage of report generator"""
-    from config import ensure_directories
-    from states import EngagementState, QualificationState, ApplicationState, VerificationState, StateManager
+    from chatbot.utils.config import ensure_directories
+    from chatbot.state.states import EngagementState, QualificationState, ApplicationState, VerificationState, StateManager
     
     ensure_directories()
     

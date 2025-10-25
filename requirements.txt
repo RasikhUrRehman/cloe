@@ -1,49 +1,53 @@
-# Core Dependencies
-langchain==0.1.20
-langchain-openai==0.1.7
-langchain-community==0.0.38
+# === Core LangChain Ecosystem ===
+langchain==0.3.0
+langchain-community==0.3.0
+langchain-openai==0.2.12        # Requires openai>=1.55.3
 
-# Vector Store
-pymilvus==2.3.6
+# === OpenAI ===
+openai==1.56.1
+tiktoken==0.7.0
 
-# Document Processing
-PyMuPDF==1.23.26
-pypdf==4.0.1
+# === Vector Store (Milvus) ===
+pymilvus==2.4.0
+grpcio==1.60.0                  # Compatible with pymilvus 2.4.0
 
-# OpenAI
-openai==1.24.0
+# === Document Processing ===
+PyMuPDF==1.24.10
+pypdf==4.2.0
 
-# Data Models & Validation
-pydantic==2.6.1
-pydantic-settings==2.1.0
+# === Data & Validation ===
+pydantic==2.7.4
+pydantic-settings==2.4.0
 
-# Utilities
+# === Utilities ===
 python-dotenv==1.0.1
-pandas==2.2.0
-numpy==1.26.3
+pandas==2.2.3
+numpy==1.26.4
+aiohttp==3.9.5
 
-# Report Generation
-fpdf2==2.7.7
-reportlab==4.0.9
+# === Report Generation ===
+fpdf2==2.8.1
+reportlab==4.1.0
 
-# Web Framework (for future API)
-fastapi==0.109.2
-uvicorn==0.27.1
+# === Web Framework ===
+fastapi==0.115.0
+starlette==0.37.2
+uvicorn==0.30.6
 
-# Logging
-loguru==0.7.2
+# === Logging ===
+loguru==0.7.3
 
-# QR Code Generation
+# === QR Code Generation ===
 qrcode==7.4.2
-Pillow==10.2.0
+Pillow==10.3.0
 
-# Session Management
-redis==5.0.1
+# === Session / Cache ===
+redis==5.0.3
 
-# Testing
-pytest>=7.0.0
-pytest-asyncio==0.23.4
+# === Testing ===
+pytest==8.2.2
+pytest-asyncio==0.23.6
 
-# Type Checking
-mypy==1.8.0
-types-requests==2.31.0.20240125
+# === Typing & Linting ===
+mypy==1.10.0
+types-requests==2.31.0.6

@@ -120,7 +120,7 @@ cloe_chatbot/
 
 5. **Initialize directories**
    ```powershell
-   python -c "from config import ensure_directories; ensure_directories()"
+   python -c "from chatbot.utils.config import ensure_directories; ensure_directories()"
    ```
 
 ### First Run

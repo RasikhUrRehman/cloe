@@ -238,7 +238,7 @@ If you have existing scripts that import from old files, update them:
 # OLD
 from agent import CleoRAGAgent
 from states import SessionState
-from config import settings
+from chatbot.utils.config import settings
 
 # NEW
 from chatbot.core.agent import CleoRAGAgent
