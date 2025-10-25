@@ -17,6 +17,7 @@ from chatbot.state.states import (
 from chatbot.utils.config import settings
 from chatbot.utils.utils import setup_logging, get_current_timestamp
 from chatbot.prompts.prompts import CleoPrompts
+from chatbot.utils.job_fetcher import format_job_details
 
 logger = setup_logging()
 
@@ -151,22 +152,33 @@ class CleoRAGAgent:
         if self.session_state.engagement:
             language = getattr(self.session_state.engagement, 'language', 'en')
         
+        # Get job details if available
+        job_context = ""
+        if self.session_state.engagement and self.session_state.engagement.job_details:
+            job_context = format_job_details(self.session_state.engagement.job_details)
+        
         # Use CleoPrompts to get the complete system prompt
         return CleoPrompts.get_system_prompt(
             session_id=self.session_state.session_id,
             current_stage=self.session_state.current_stage,
-            language=language
+            language=language,
+            job_context=job_context
         )
     
-    def process_message(self, user_message: str) -> str:
+    def _refresh_agent_with_job_context(self):
+        """Refresh the agent with updated job context"""
+        self.agent = self._create_agent()
+        logger.info("Agent refreshed with job context")
+    
+    def process_message(self, user_message: str) -> List[str]:
         """
-        Process user message and generate response
+        Process user message and generate response(s)
         
         Args:
             user_message: User's input message
         
         Returns:
-            Agent's response
+            List of agent's response messages (can be single or multiple)
         """
         logger.info(f"Processing message: {user_message}")
         
@@ -175,14 +187,39 @@ class CleoRAGAgent:
             response = self.agent.invoke({"input": user_message})
             agent_response = response.get("output", "I'm sorry, I didn't understand that.")
             
+            # Split response into multiple messages if needed
+            messages = self._split_multi_messages(agent_response)
+            
             # Update conversation state based on response
             self._update_state_from_conversation(user_message, agent_response)
             
-            return agent_response
+            return messages
         
         except Exception as e:
             logger.error(f"Error processing message: {e}")
-            return "I apologize, but I encountered an error. Could you please rephrase that?"
+            return ["I apologize, but I encountered an error. Could you please rephrase that?"]
+    
+    def _split_multi_messages(self, response: str) -> List[str]:
+        """
+        Split agent response into multiple messages if separator is present
+        
+        Args:
+            response: Agent's response text
+        
+        Returns:
+            List of message strings
+        """
+        # Check if response contains the multi-message separator
+        separator = "[NEXT_MESSAGE]"
+        
+        if separator in response:
+            # Split by separator and clean up whitespace
+            messages = [msg.strip() for msg in response.split(separator) if msg.strip()]
+            logger.info(f"Split response into {len(messages)} messages")
+            return messages
+        else:
+            # Return single message as a list
+            return [response]
     
     def _update_state_from_conversation(self, user_message: str, agent_response: str):
         """
@@ -278,8 +315,14 @@ def main():
             print("\nThank you for using Cleo!")
             break
         
-        response = agent.process_message(user_input)
-        print(f"\nCleo: {response}\n")
+        responses = agent.process_message(user_input)
+        
+        # Handle multiple messages
+        for i, response in enumerate(responses):
+            if i > 0:
+                print()  # Add newline between multiple messages
+            print(f"Cleo: {response}")
+        print()  # Add newline after all messages
         
         # Show stage info
         summary = agent.get_conversation_summary()

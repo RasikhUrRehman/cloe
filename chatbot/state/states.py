@@ -30,6 +30,7 @@ class EngagementState(BaseModel):
     consent_given: bool = False
     company_id: Optional[str] = None
     job_id: Optional[str] = None
+    job_details: Optional[Dict[str, Any]] = None  # Full job details from API
     language: str = "en"
     stage_completed: bool = False
     

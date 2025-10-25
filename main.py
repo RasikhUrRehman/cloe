@@ -113,12 +113,16 @@ class CleoApplication:
             message: User's message
         
         Returns:
-            Agent's response
+            Agent's response (if multiple messages, they are joined with newlines)
         """
         if not self.agent:
             return "Please start a new session first."
         
-        return self.agent.process_message(message)
+        # Process message returns a list of messages
+        responses = self.agent.process_message(message)
+        
+        # Join multiple messages with double newline for readability
+        return "\n\n".join(responses)
     
     def get_session_summary(self) -> dict:
         """Get summary of current session"""

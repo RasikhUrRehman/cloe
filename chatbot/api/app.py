@@ -14,6 +14,7 @@ from chatbot.core.retrievers import RetrievalMethod
 from chatbot.state.states import SessionState, StateManager
 from chatbot.utils.config import settings, ensure_directories
 from chatbot.utils.utils import setup_logging
+from chatbot.utils.job_fetcher import get_job_by_id
 
 # Initialize logging
 logger = setup_logging()
@@ -44,6 +45,10 @@ active_sessions: Dict[str, CleoRAGAgent] = {}
 # Pydantic Models
 class SessionCreateRequest(BaseModel):
     """Request model for creating a new session"""
+    job_id: Optional[str] = Field(
+        default=None,
+        description="Job ID to apply for"
+    )
     retrieval_method: Optional[str] = Field(
         default="hybrid",
         description="Retrieval method: semantic, similarity, or hybrid"
@@ -70,7 +75,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     """Response model for chat messages"""
     session_id: str
-    response: str
+    responses: List[str]  # Changed from single 'response' to multiple 'responses'
     current_stage: str
     timestamp: str
 
@@ -185,23 +190,44 @@ async def create_session(request: SessionCreateRequest):
         # Generate new session ID
         session_id = str(uuid.uuid4())
         
+        # Fetch job details if job_id is provided
+        job_details = None
+        if request.job_id:
+            job_details = get_job_by_id(request.job_id)
+            if not job_details:
+                logger.warning(f"Job ID {request.job_id} not found, proceeding without job details")
+        
         # Create agent
         agent = get_or_create_agent(session_id, request.retrieval_method)
         
+        # Initialize engagement state with job details
+        if not agent.session_state.engagement:
+            from chatbot.state.states import EngagementState
+            agent.session_state.engagement = EngagementState(
+                session_id=session_id
+            )
+        
+        # Set job_id and job_details
+        if request.job_id:
+            agent.session_state.engagement.job_id = request.job_id
+            agent.session_state.engagement.job_details = job_details
+        
         # Set language if provided
         if request.language:
-            if not agent.session_state.engagement:
-                from chatbot.state.states import EngagementState
-                agent.session_state.engagement = EngagementState(
-                    session_id=session_id
-                )
             agent.session_state.engagement.language = request.language
         
-        logger.info(f"Created new session: {session_id}")
+        # Recreate agent with job context (this will include job details in the system prompt)
+        agent._refresh_agent_with_job_context()
+        
+        # Generate initial greeting from Cleo
+        initial_greeting_prompt = "Start the conversation by greeting the user warmly and introducing yourself."
+        initial_messages = agent.process_message(initial_greeting_prompt)
+        
+        logger.info(f"Created new session: {session_id} for job: {request.job_id if request.job_id else 'N/A'}")
         
         return SessionCreateResponse(
             session_id=session_id,
-            message="Session created successfully. You can now start chatting!",
+            message=initial_messages[0] if initial_messages else "Hello! I'm Cleo, ready to help you!",  # Use first message for initial greeting
             current_stage=agent.session_state.current_stage.value
         )
     
@@ -219,20 +245,20 @@ async def chat(request: ChatRequest):
         request: Chat request with session_id and message
     
     Returns:
-        Chat response with agent's reply
+        Chat response with agent's reply (can be multiple messages)
     """
     try:
         # Get or create agent
         agent = get_or_create_agent(request.session_id)
         
-        # Process message
-        response = agent.process_message(request.message)
+        # Process message (returns list of messages)
+        responses = agent.process_message(request.message)
         
-        logger.info(f"Processed message for session {request.session_id}")
+        logger.info(f"Processed message for session {request.session_id}, generated {len(responses)} response(s)")
         
         return ChatResponse(
             session_id=request.session_id,
-            response=response,
+            responses=responses,  # Return list of messages
             current_stage=agent.session_state.current_stage.value,
             timestamp=datetime.utcnow().isoformat()
         )

@@ -88,8 +88,13 @@ def simulate_conversation():
             print(f"{speaker}: {message}")
             
             if speaker == "User":
-                response = agent.process_message(message)
-                print(f"\nCleo: {response}\n")
+                responses = agent.process_message(message)
+                # Handle multiple messages
+                for i, response in enumerate(responses):
+                    if i > 0:
+                        print()  # Add newline between multiple messages
+                    print(f"Cleo: {response}")
+                print()  # Add newline after all messages
                 time.sleep(0.5)  # Simulate thinking time
         
         # Show stage summary
