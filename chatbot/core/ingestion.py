@@ -147,11 +147,21 @@ class DocumentIngestion:
         """
         logger.info(f"Starting ingestion for: {document_name}")
         
+        # Validate PDF file exists
+        if not os.path.exists(pdf_path):
+            raise FileNotFoundError(f"PDF file not found: {pdf_path}")
+        
         # Extract text
         text = self.extract_text_from_pdf(pdf_path)
         
+        if not text.strip():
+            raise ValueError(f"No text extracted from PDF: {pdf_path}")
+        
         # Chunk text
         chunks = self.chunk_text(text)
+        
+        if not chunks:
+            raise ValueError(f"No text chunks generated from PDF: {pdf_path}")
         
         # Generate embeddings
         embeddings = self.generate_embeddings(chunks)
@@ -182,6 +192,47 @@ class DocumentIngestion:
             "total_characters": len(text),
             "status": "success"
         }
+    
+    def get_document_stats(self, document_name: str) -> Dict[str, Any]:
+        """
+        Get statistics for a specific document in the knowledge base
+        
+        Args:
+            document_name: Name of the document
+        
+        Returns:
+            Document statistics
+        """
+        try:
+            collection = Collection(settings.MILVUS_COLLECTION_NAME)
+            collection.load()
+            
+            # Query for chunks of this document
+            expr = f'document_name == "{document_name}"'
+            results = collection.query(
+                expr=expr,
+                output_fields=["text", "job_type", "section", "chunk_index"]
+            )
+            
+            if not results:
+                return {"found": False, "message": "Document not found"}
+            
+            total_chars = sum(len(result["text"]) for result in results)
+            job_types = set(result["job_type"] for result in results)
+            sections = set(result["section"] for result in results)
+            
+            return {
+                "found": True,
+                "document_name": document_name,
+                "total_chunks": len(results),
+                "total_characters": total_chars,
+                "job_types": list(job_types),
+                "sections": list(sections)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting document stats: {e}")
+            return {"found": False, "error": str(e)}
     
     def ingest_directory(
         self,

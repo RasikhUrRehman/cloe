@@ -2,15 +2,20 @@
 FastAPI Application for Cleo RAG Agent
 Provides REST API endpoints for chat interactions
 """
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, FileResponse
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List
 import uuid
+import os
+import shutil
 from datetime import datetime
+from pathlib import Path
 
 from chatbot.core.agent import CleoRAGAgent
 from chatbot.core.retrievers import RetrievalMethod
+from chatbot.core.ingestion import DocumentIngestion
 from chatbot.state.states import SessionState, StateManager
 from chatbot.utils.config import settings, ensure_directories
 from chatbot.utils.utils import setup_logging
@@ -95,6 +100,32 @@ class HealthResponse(BaseModel):
     status: str
     version: str
     timestamp: str
+
+
+class DocumentUploadResponse(BaseModel):
+    """Response model for document upload"""
+    message: str
+    document_id: str
+    filename: str
+    document_type: str
+    job_type: str
+    section: str
+    total_chunks: int
+    total_characters: int
+    timestamp: str
+
+
+class DocumentListResponse(BaseModel):
+    """Response model for listing documents"""
+    documents: List[Dict[str, Any]]
+    total_count: int
+
+
+class DocumentDeleteResponse(BaseModel):
+    """Response model for document deletion"""
+    message: str
+    document_id: str
+    deleted: bool
 
 
 # Helper Functions
@@ -358,6 +389,343 @@ async def reset_session(session_id: str):
     except Exception as e:
         logger.error(f"Error resetting session: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to reset session: {str(e)}")
+
+
+@app.get("/api/v1/session/{session_id}/fit_score")
+async def get_fit_score(session_id: str):
+    """
+    Get fit score for a completed application
+    
+    Args:
+        session_id: Session ID
+    
+    Returns:
+        Fit score information and reports if available
+    """
+    try:
+        # Get or create agent
+        agent = get_or_create_agent(session_id)
+        
+        # Check if application is complete
+        if not (agent.session_state.application and agent.session_state.application.stage_completed):
+            raise HTTPException(status_code=400, detail="Application not yet complete")
+        
+        # Calculate current fit score
+        from chatbot.utils.fit_score import FitScoreCalculator
+        calculator = FitScoreCalculator()
+        
+        fit_score = calculator.calculate_fit_score(
+            qualification=agent.session_state.qualification,
+            application=agent.session_state.application,
+            verification=agent.session_state.verification
+        )
+        
+        # Try to get generated reports
+        import os
+        from chatbot.utils.config import settings
+        
+        reports_path = {
+            "json_report": None,
+            "pdf_report": None
+        }
+        
+        # Check if reports exist
+        json_path = os.path.join(settings.REPORTS_DIR, f"{session_id}_report.json")
+        pdf_path = os.path.join(settings.REPORTS_DIR, f"{session_id}_report.pdf")
+        
+        if os.path.exists(json_path):
+            reports_path["json_report"] = json_path
+        if os.path.exists(pdf_path):
+            reports_path["pdf_report"] = pdf_path
+        
+        return {
+            "session_id": session_id,
+            "fit_score": {
+                "total_score": fit_score.total_score,
+                "rating": calculator.get_fit_rating(fit_score.total_score),
+                "qualification_score": fit_score.qualification_score,
+                "experience_score": fit_score.experience_score,
+                "verification_score": fit_score.verification_score,
+                "breakdown": fit_score.breakdown
+            },
+            "reports": reports_path,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting fit score: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get fit score: {str(e)}")
+
+
+@app.post("/api/v1/session/{session_id}/calculate_fit_score")
+async def calculate_fit_score(session_id: str):
+    """
+    Manually trigger fit score calculation and report generation
+    
+    Args:
+        session_id: Session ID
+    
+    Returns:
+        Fit score calculation result
+    """
+    try:
+        # Get or create agent
+        agent = get_or_create_agent(session_id)
+        
+        # Check if we have minimum required data
+        if not agent.session_state.qualification:
+            raise HTTPException(status_code=400, detail="No qualification data available")
+        
+        if not agent.session_state.application:
+            raise HTTPException(status_code=400, detail="No application data available")
+        
+        # Calculate fit score
+        from chatbot.utils.fit_score import FitScoreCalculator
+        from chatbot.utils.report_generator import ReportGenerator
+        
+        calculator = FitScoreCalculator()
+        fit_score = calculator.calculate_fit_score(
+            qualification=agent.session_state.qualification,
+            application=agent.session_state.application,
+            verification=agent.session_state.verification
+        )
+        
+        # Generate reports
+        report_gen = ReportGenerator()
+        reports = report_gen.generate_report(
+            session_id=session_id,
+            include_fit_score=True
+        )
+        
+        # Update application status if not already complete
+        if agent.session_state.application and not agent.session_state.application.stage_completed:
+            agent.session_state.application.application_status = "submitted"
+            agent.session_state.application.stage_completed = True
+            
+            # Move to verification stage
+            from chatbot.state.states import ConversationStage, VerificationState
+            agent.session_state.current_stage = ConversationStage.VERIFICATION
+            
+            if not agent.session_state.verification:
+                agent.session_state.verification = VerificationState(
+                    session_id=session_id
+                )
+            
+            # Save updated state
+            agent.state_manager.save_session(agent.session_state)
+        
+        logger.info(f"Fit score calculated and reports generated for session {session_id}")
+        
+        return {
+            "session_id": session_id,
+            "fit_score": {
+                "total_score": fit_score.total_score,
+                "rating": calculator.get_fit_rating(fit_score.total_score),
+                "qualification_score": fit_score.qualification_score,
+                "experience_score": fit_score.experience_score,
+                "verification_score": fit_score.verification_score
+            },
+            "reports": reports,
+            "stage_updated": True,
+            "current_stage": agent.session_state.current_stage.value,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error calculating fit score: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to calculate fit score: {str(e)}")
+
+
+# Document Management Endpoints
+@app.post("/api/v1/documents/upload", response_model=DocumentUploadResponse)
+async def upload_document(
+    file: UploadFile = File(...),
+    document_type: str = Form(...),  # "company" or "job"
+    job_type: str = Form(default="general"),
+    section: str = Form(default="general"),
+    background_tasks: BackgroundTasks = BackgroundTasks()
+):
+    """
+    Upload a PDF document for the knowledge base
+    
+    Args:
+        file: PDF file to upload
+        document_type: Type of document ("company" or "job")
+        job_type: Job category (e.g., "warehouse", "healthcare", "retail")
+        section: Document section (e.g., "company_info", "job_requirements", "benefits")
+    
+    Returns:
+        Document upload response
+    """
+    try:
+        # Validate file type
+        if not file.filename.lower().endswith('.pdf'):
+            raise HTTPException(status_code=400, detail="Only PDF files are allowed")
+        
+        # Validate document type
+        if document_type not in ["company", "job"]:
+            raise HTTPException(status_code=400, detail="document_type must be 'company' or 'job'")
+        
+        # Generate unique document ID
+        document_id = str(uuid.uuid4())
+        
+        # Create upload directory if it doesn't exist
+        upload_dir = Path(settings.UPLOADS_DIR)
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Save uploaded file
+        file_extension = Path(file.filename).suffix
+        saved_filename = f"{document_id}_{document_type}_{job_type}_{section}{file_extension}"
+        file_path = upload_dir / saved_filename
+        
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        logger.info(f"Saved uploaded file: {file_path}")
+        
+        # Add background task to process the document
+        background_tasks.add_task(
+            process_uploaded_document,
+            str(file_path),
+            document_id,
+            file.filename,
+            document_type,
+            job_type,
+            section
+        )
+        
+        return DocumentUploadResponse(
+            message="Document uploaded successfully and is being processed",
+            document_id=document_id,
+            filename=file.filename,
+            document_type=document_type,
+            job_type=job_type,
+            section=section,
+            total_chunks=0,  # Will be updated after processing
+            total_characters=0,  # Will be updated after processing
+            timestamp=datetime.utcnow().isoformat()
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error uploading document: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to upload document: {str(e)}")
+
+
+@app.get("/api/v1/documents", response_model=DocumentListResponse)
+async def list_documents():
+    """
+    List all uploaded documents
+    
+    Returns:
+        List of uploaded documents with their metadata
+    """
+    try:
+        upload_dir = Path(settings.UPLOADS_DIR)
+        documents = []
+        
+        if upload_dir.exists():
+            for file_path in upload_dir.glob("*.pdf"):
+                # Parse filename to extract metadata
+                filename_parts = file_path.stem.split("_")
+                if len(filename_parts) >= 4:
+                    document_id = filename_parts[0]
+                    document_type = filename_parts[1]
+                    job_type = filename_parts[2]
+                    section = "_".join(filename_parts[3:])  # Handle sections with underscores
+                    
+                    file_stats = file_path.stat()
+                    documents.append({
+                        "document_id": document_id,
+                        "filename": file_path.name,
+                        "original_filename": file_path.name.replace(f"{document_id}_{document_type}_{job_type}_{section}_", ""),
+                        "document_type": document_type,
+                        "job_type": job_type,
+                        "section": section,
+                        "file_size": file_stats.st_size,
+                        "upload_date": datetime.fromtimestamp(file_stats.st_ctime).isoformat()
+                    })
+        
+        return DocumentListResponse(
+            documents=documents,
+            total_count=len(documents)
+        )
+    
+    except Exception as e:
+        logger.error(f"Error listing documents: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to list documents: {str(e)}")
+
+
+@app.delete("/api/v1/documents/{document_id}", response_model=DocumentDeleteResponse)
+async def delete_document(document_id: str):
+    """
+    Delete an uploaded document
+    
+    Args:
+        document_id: ID of the document to delete
+    
+    Returns:
+        Document deletion response
+    """
+    try:
+        upload_dir = Path(settings.UPLOADS_DIR)
+        deleted = False
+        
+        # Find and delete the file
+        for file_path in upload_dir.glob(f"{document_id}_*.pdf"):
+            file_path.unlink()
+            deleted = True
+            logger.info(f"Deleted document: {file_path}")
+            break
+        
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        return DocumentDeleteResponse(
+            message="Document deleted successfully",
+            document_id=document_id,
+            deleted=True
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting document: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete document: {str(e)}")
+
+
+async def process_uploaded_document(
+    file_path: str,
+    document_id: str,
+    original_filename: str,
+    document_type: str,
+    job_type: str,
+    section: str
+):
+    """
+    Background task to process uploaded document
+    """
+    try:
+        # Initialize document ingestion
+        ingestion = DocumentIngestion()
+        
+        # Process the document
+        result = ingestion.ingest_document(
+            pdf_path=file_path,
+            document_name=f"{document_id}_{original_filename}",
+            job_type=job_type,
+            section=section
+        )
+        
+        logger.info(f"Successfully processed document {document_id}: {result}")
+        
+    except Exception as e:
+        logger.error(f"Error processing document {document_id}: {e}")
 
 
 # Startup and Shutdown Events

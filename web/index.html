@@ -52,6 +52,96 @@
                     <div id="selectedJobInfo" class="selected-job-info" style="display: none;"></div>
                     <div id="jobsError" class="error-message" style="display: none;"></div>
                 </div>
+
+                <!-- Document Upload Section -->
+                <div class="document-upload-container">
+                    <h3 class="upload-section-title">Upload Company/Job Documents (Optional)</h3>
+                    <p class="upload-description">Upload PDF documents related to the company or job position to help Cleo provide more accurate assistance.</p>
+                    
+                    <div class="upload-form-container">
+                        <form id="documentUploadForm" class="upload-form" enctype="multipart/form-data">
+                            <div class="upload-field-group">
+                                <div class="upload-field">
+                                    <label for="documentFile" class="upload-label">Select PDF Document</label>
+                                    <div class="file-input-wrapper">
+                                        <input type="file" id="documentFile" name="file" accept=".pdf" class="file-input" required>
+                                        <div class="file-input-display">
+                                            <span id="fileDisplayText">Choose PDF file...</span>
+                                            <button type="button" class="file-browse-button">Browse</button>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="upload-field">
+                                    <label for="documentType" class="upload-label">Document Type</label>
+                                    <select id="documentType" name="document_type" class="upload-select" required>
+                                        <option value="">Select document type</option>
+                                        <option value="company">Company Document</option>
+                                        <option value="job">Job Document</option>
+                                    </select>
+                                </div>
+                                
+                                <div class="upload-field">
+                                    <label for="jobType" class="upload-label">Job Category</label>
+                                    <select id="jobType" name="job_type" class="upload-select">
+                                        <option value="general">General</option>
+                                        <option value="warehouse">Warehouse</option>
+                                        <option value="healthcare">Healthcare</option>
+                                        <option value="retail">Retail</option>
+                                        <option value="food_service">Food Service</option>
+                                        <option value="construction">Construction</option>
+                                        <option value="office">Office</option>
+                                        <option value="customer_service">Customer Service</option>
+                                    </select>
+                                </div>
+                                
+                                <div class="upload-field">
+                                    <label for="documentSection" class="upload-label">Document Section</label>
+                                    <select id="documentSection" name="section" class="upload-select">
+                                        <option value="general">General</option>
+                                        <option value="company_info">Company Information</option>
+                                        <option value="job_requirements">Job Requirements</option>
+                                        <option value="benefits">Benefits & Compensation</option>
+                                        <option value="policies">Policies & Procedures</option>
+                                        <option value="training">Training & Development</option>
+                                    </select>
+                                </div>
+                            </div>
+                            
+                            <button type="submit" id="uploadButton" class="upload-button">
+                                <span class="upload-text">Upload Document</span>
+                                <span class="upload-spinner" style="display: none;">
+                                    <div class="spinner-small"></div>
+                                </span>
+                            </button>
+                        </form>
+                        
+                        <div id="uploadProgress" class="upload-progress" style="display: none;">
+                            <div class="progress-bar">
+                                <div id="progressFill" class="progress-fill"></div>
+                            </div>
+                            <div id="progressText" class="progress-text">Uploading...</div>
+                        </div>
+                        
+                        <div id="uploadResults" class="upload-results" style="display: none;"></div>
+                        <div id="uploadError" class="error-message" style="display: none;"></div>
+                    </div>
+                    
+                    <!-- Uploaded Documents List -->
+                    <div class="uploaded-documents-container">
+                        <div class="uploaded-documents-header">
+                            <h4>Uploaded Documents</h4>
+                            <button id="refreshDocumentsButton" class="refresh-button" title="Refresh documents">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
+                                </svg>
+                            </button>
+                        </div>
+                        <div id="documentsList" class="documents-list">
+                            <div class="no-documents">No documents uploaded yet.</div>
+                        </div>
+                    </div>
+                </div>
                 
                 <button id="startButton" class="start-button">Start Conversation</button>
                 <div id="landingError" class="error-message" style="display: none;"></div>
@@ -102,6 +192,37 @@
                             <div class="progress-icon">○</div>
                             <div class="progress-label">Verification</div>
                         </div>
+                    </div>
+                </div>
+
+                <!-- Fit Score Section -->
+                <div class="status-section" id="fitScoreSection" style="display: none;">
+                    <h3>Fit Score</h3>
+                    <div id="fitScoreDisplay" class="fit-score-display">
+                        <div class="fit-score-main">
+                            <div class="fit-score-total">
+                                <span id="fitScoreValue">--</span>
+                                <span class="fit-score-max">/100</span>
+                            </div>
+                            <div id="fitScoreRating" class="fit-score-rating">--</div>
+                        </div>
+                        <div class="fit-score-breakdown">
+                            <div class="score-item">
+                                <span class="score-label">Qualification</span>
+                                <span id="qualificationScore" class="score-value">--</span>
+                            </div>
+                            <div class="score-item">
+                                <span class="score-label">Experience</span>
+                                <span id="experienceScore" class="score-value">--</span>
+                            </div>
+                            <div class="score-item">
+                                <span class="score-label">Verification</span>
+                                <span id="verificationScore" class="score-value">--</span>
+                            </div>
+                        </div>
+                        <button id="calculateFitScoreButton" class="action-button primary" style="margin-top: 10px;">
+                            Calculate Fit Score
+                        </button>
                     </div>
                 </div>
 

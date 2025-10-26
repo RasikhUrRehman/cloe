@@ -42,6 +42,31 @@ const qualificationProgress = document.getElementById('qualificationProgress');
 const applicationProgress = document.getElementById('applicationProgress');
 const verificationProgress = document.getElementById('verificationProgress');
 
+// Fit score elements
+const fitScoreSection = document.getElementById('fitScoreSection');
+const fitScoreValue = document.getElementById('fitScoreValue');
+const fitScoreRating = document.getElementById('fitScoreRating');
+const qualificationScore = document.getElementById('qualificationScore');
+const experienceScore = document.getElementById('experienceScore');
+const verificationScore = document.getElementById('verificationScore');
+const calculateFitScoreButton = document.getElementById('calculateFitScoreButton');
+
+// Document upload elements
+const documentUploadForm = document.getElementById('documentUploadForm');
+const documentFile = document.getElementById('documentFile');
+const fileDisplayText = document.getElementById('fileDisplayText');
+const documentType = document.getElementById('documentType');
+const jobType = document.getElementById('jobType');
+const documentSection = document.getElementById('documentSection');
+const uploadButton = document.getElementById('uploadButton');
+const uploadProgress = document.getElementById('uploadProgress');
+const progressFill = document.getElementById('progressFill');
+const progressText = document.getElementById('progressText');
+const uploadResults = document.getElementById('uploadResults');
+const uploadError = document.getElementById('uploadError');
+const documentsList = document.getElementById('documentsList');
+const refreshDocumentsButton = document.getElementById('refreshDocumentsButton');
+
 // Utility Functions
 function showError(element, message) {
     element.textContent = message;
@@ -126,6 +151,14 @@ function updateSessionStatus(status) {
     updateProgressItem(qualificationProgress, status.qualification_complete);
     updateProgressItem(applicationProgress, status.application_complete);
     updateProgressItem(verificationProgress, status.verification_complete);
+    
+    // Show fit score section if application is complete
+    if (status.application_complete) {
+        fitScoreSection.style.display = 'block';
+        updateFitScore();
+    } else {
+        fitScoreSection.style.display = 'none';
+    }
 }
 
 function updateProgressItem(element, completed) {
@@ -135,6 +168,83 @@ function updateProgressItem(element, completed) {
     } else {
         element.classList.remove('completed');
         element.querySelector('.progress-icon').textContent = '○';
+    }
+}
+
+async function updateFitScore() {
+    try {
+        const fitScoreData = await getFitScore();
+        
+        if (fitScoreData && fitScoreData.fit_score) {
+            const score = fitScoreData.fit_score;
+            
+            // Update main score display
+            fitScoreValue.textContent = Math.round(score.total_score);
+            fitScoreRating.textContent = score.rating;
+            
+            // Update rating color
+            fitScoreRating.className = 'fit-score-rating';
+            const ratingClass = score.rating.toLowerCase().replace(' ', '-');
+            fitScoreRating.classList.add(ratingClass);
+            
+            // Update breakdown scores
+            qualificationScore.textContent = Math.round(score.qualification_score);
+            experienceScore.textContent = Math.round(score.experience_score);
+            verificationScore.textContent = Math.round(score.verification_score);
+            
+            // Hide calculate button since score is available
+            calculateFitScoreButton.style.display = 'none';
+        } else {
+            // Show calculate button if no score available
+            calculateFitScoreButton.style.display = 'block';
+        }
+    } catch (error) {
+        console.error('Error updating fit score:', error);
+        // Show calculate button on error
+        calculateFitScoreButton.style.display = 'block';
+    }
+}
+
+async function handleCalculateFitScore() {
+    try {
+        calculateFitScoreButton.disabled = true;
+        calculateFitScoreButton.textContent = 'Calculating...';
+        
+        const result = await calculateFitScore();
+        
+        if (result && result.fit_score) {
+            const score = result.fit_score;
+            
+            // Update displays
+            fitScoreValue.textContent = Math.round(score.total_score);
+            fitScoreRating.textContent = score.rating;
+            
+            // Update rating color
+            fitScoreRating.className = 'fit-score-rating';
+            const ratingClass = score.rating.toLowerCase().replace(' ', '-');
+            fitScoreRating.classList.add(ratingClass);
+            
+            // Update breakdown scores
+            qualificationScore.textContent = Math.round(score.qualification_score);
+            experienceScore.textContent = Math.round(score.experience_score);
+            verificationScore.textContent = Math.round(score.verification_score);
+            
+            // Hide the button
+            calculateFitScoreButton.style.display = 'none';
+            
+            // Show success message
+            addMessage('Your fit score has been calculated! Check the sidebar for details.', false);
+            
+            // Update session status to reflect changes
+            const status = await getSessionStatus();
+            updateSessionStatus(status);
+        }
+    } catch (error) {
+        console.error('Error calculating fit score:', error);
+        addMessage('Sorry, I encountered an error while calculating your fit score. Please try again.', false);
+    } finally {
+        calculateFitScoreButton.disabled = false;
+        calculateFitScoreButton.textContent = 'Calculate Fit Score';
     }
 }
 
@@ -275,6 +385,44 @@ async function getSessionStatus() {
         return data;
     } catch (error) {
         console.error('Error getting session status:', error);
+        throw error;
+    }
+}
+
+async function getFitScore() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/v1/session/${sessionId}/fit_score`);
+        
+        if (!response.ok) {
+            if (response.status === 400) {
+                // Application not complete yet
+                return null;
+            }
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        return data;
+    } catch (error) {
+        console.error('Error getting fit score:', error);
+        return null;
+    }
+}
+
+async function calculateFitScore() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/v1/session/${sessionId}/calculate_fit_score`, {
+            method: 'POST'
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        return data;
+    } catch (error) {
+        console.error('Error calculating fit score:', error);
         throw error;
     }
 }
@@ -518,6 +666,217 @@ function stopStatusUpdates() {
     }
 }
 
+// Document Upload Functions
+async function handleDocumentUpload(event) {
+    event.preventDefault();
+    
+    const formData = new FormData(documentUploadForm);
+    const file = documentFile.files[0];
+    
+    if (!file) {
+        showUploadError('Please select a PDF file.');
+        return;
+    }
+    
+    if (!file.name.toLowerCase().endsWith('.pdf')) {
+        showUploadError('Only PDF files are allowed.');
+        return;
+    }
+    
+    if (file.size > 10 * 1024 * 1024) { // 10MB limit
+        showUploadError('File size must be less than 10MB.');
+        return;
+    }
+    
+    try {
+        showUploadProgress(true);
+        hideUploadError();
+        hideUploadResults();
+        
+        // Simulate upload progress
+        updateUploadProgress(0, 'Uploading...');
+        
+        const response = await fetch(`${API_BASE_URL}/api/v1/documents/upload`, {
+            method: 'POST',
+            body: formData
+        });
+        
+        updateUploadProgress(100, 'Processing...');
+        
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.detail || 'Upload failed');
+        }
+        
+        const result = await response.json();
+        showUploadSuccess(result);
+        resetUploadForm();
+        loadUploadedDocuments(); // Refresh the documents list
+        
+    } catch (error) {
+        console.error('Upload error:', error);
+        showUploadError(error.message || 'Upload failed');
+    } finally {
+        showUploadProgress(false);
+    }
+}
+
+function handleFileSelection() {
+    const file = documentFile.files[0];
+    if (file) {
+        fileDisplayText.textContent = file.name;
+        fileDisplayText.classList.add('file-selected');
+    } else {
+        fileDisplayText.textContent = 'Choose PDF file...';
+        fileDisplayText.classList.remove('file-selected');
+    }
+}
+
+function showUploadProgress(show) {
+    uploadProgress.style.display = show ? 'block' : 'none';
+    uploadButton.disabled = show;
+    
+    if (show) {
+        uploadButton.querySelector('.upload-text').style.display = 'none';
+        uploadButton.querySelector('.upload-spinner').style.display = 'inline-block';
+    } else {
+        uploadButton.querySelector('.upload-text').style.display = 'inline';
+        uploadButton.querySelector('.upload-spinner').style.display = 'none';
+    }
+}
+
+function updateUploadProgress(percentage, text) {
+    progressFill.style.width = percentage + '%';
+    progressText.textContent = text;
+}
+
+function showUploadSuccess(result) {
+    uploadResults.innerHTML = `
+        <div class="upload-success">
+            <div class="success-icon">✓</div>
+            <div class="success-message">
+                <strong>${result.filename}</strong> uploaded successfully!
+                <div class="upload-details">
+                    <span>Type: ${result.document_type}</span>
+                    <span>Category: ${result.job_type}</span>
+                    <span>Section: ${result.section}</span>
+                </div>
+            </div>
+        </div>
+    `;
+    uploadResults.style.display = 'block';
+    setTimeout(() => {
+        uploadResults.style.display = 'none';
+    }, 5000);
+}
+
+function showUploadError(message) {
+    uploadError.textContent = message;
+    uploadError.style.display = 'block';
+}
+
+function hideUploadError() {
+    uploadError.style.display = 'none';
+}
+
+function hideUploadResults() {
+    uploadResults.style.display = 'none';
+}
+
+function resetUploadForm() {
+    documentUploadForm.reset();
+    fileDisplayText.textContent = 'Choose PDF file...';
+    fileDisplayText.classList.remove('file-selected');
+    documentType.value = '';
+    jobType.value = 'general';
+    documentSection.value = 'general';
+}
+
+async function loadUploadedDocuments() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/v1/documents`);
+        
+        if (!response.ok) {
+            throw new Error('Failed to load documents');
+        }
+        
+        const data = await response.json();
+        displayUploadedDocuments(data.documents);
+        
+    } catch (error) {
+        console.error('Error loading documents:', error);
+        documentsList.innerHTML = '<div class="error-message">Failed to load documents</div>';
+    }
+}
+
+function displayUploadedDocuments(documents) {
+    if (!documents || documents.length === 0) {
+        documentsList.innerHTML = '<div class="no-documents">No documents uploaded yet.</div>';
+        return;
+    }
+    
+    const documentsHtml = documents.map(doc => {
+        const uploadDate = new Date(doc.upload_date).toLocaleDateString();
+        const fileSize = formatFileSize(doc.file_size);
+        
+        return `
+            <div class="document-item" data-document-id="${doc.document_id}">
+                <div class="document-info">
+                    <div class="document-name">${doc.original_filename || doc.filename}</div>
+                    <div class="document-details">
+                        <span class="document-type">${doc.document_type}</span>
+                        <span class="document-category">${doc.job_type}</span>
+                        <span class="document-section">${doc.section}</span>
+                    </div>
+                    <div class="document-meta">
+                        <span class="file-size">${fileSize}</span>
+                        <span class="upload-date">${uploadDate}</span>
+                    </div>
+                </div>
+                <div class="document-actions">
+                    <button class="delete-document-button" onclick="deleteDocument('${doc.document_id}')" title="Delete document">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+    
+    documentsList.innerHTML = documentsHtml;
+}
+
+async function deleteDocument(documentId) {
+    if (!confirm('Are you sure you want to delete this document?')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/v1/documents/${documentId}`, {
+            method: 'DELETE'
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to delete document');
+        }
+        
+        loadUploadedDocuments(); // Refresh the list
+        
+    } catch (error) {
+        console.error('Error deleting document:', error);
+        alert('Failed to delete document: ' + error.message);
+    }
+}
+
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
 // Event Listeners
 startButton.addEventListener('click', handleStartConversation);
 chatForm.addEventListener('submit', handleSendMessage);
@@ -525,9 +884,16 @@ newSessionButton.addEventListener('click', handleNewSession);
 resetButton.addEventListener('click', handleResetSession);
 jobSelect.addEventListener('change', handleJobSelection);
 refreshJobsButton.addEventListener('click', loadJobs);
+calculateFitScoreButton.addEventListener('click', handleCalculateFitScore);
 
-// Load jobs on page load
+// Document upload event listeners
+documentUploadForm.addEventListener('submit', handleDocumentUpload);
+documentFile.addEventListener('change', handleFileSelection);
+refreshDocumentsButton.addEventListener('click', loadUploadedDocuments);
+
+// Load jobs and documents on page load
 loadJobs();
+loadUploadedDocuments();
 
 // Initial health check
 checkHealth();
