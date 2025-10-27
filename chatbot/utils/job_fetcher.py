@@ -2,8 +2,11 @@
 Job Fetcher Utility
 Fetches job details from Xano API
 """
+
+from typing import Any, Dict, List, Optional
+
 import requests
-from typing import Optional, Dict, Any, List
+
 from chatbot.utils.utils import setup_logging
 
 logger = setup_logging()
@@ -15,7 +18,7 @@ API_URL = "https://xoho-w3ng-km3o.n7e.xano.io/api:L-QNLSmb/get_all_job_"
 def get_all_jobs() -> List[Dict[str, Any]]:
     """
     Fetch all jobs from the Xano API
-    
+
     Returns:
         List of job dictionaries
     """
@@ -33,26 +36,28 @@ def get_all_jobs() -> List[Dict[str, Any]]:
 def get_job_by_id(job_id: str) -> Optional[Dict[str, Any]]:
     """
     Fetch a specific job by its ID
-    
+
     Args:
         job_id: The unique identifier for the job
-    
+
     Returns:
         Job dictionary if found, None otherwise
     """
     try:
         # Fetch all jobs
         all_jobs = get_all_jobs()
-        
+
         # Find the specific job
         for job in all_jobs:
             if str(job.get("id")) == str(job_id):
-                logger.info(f"Found job: {job.get('job_title', 'Unknown')} (ID: {job_id})")
+                logger.info(
+                    f"Found job: {job.get('job_title', 'Unknown')} (ID: {job_id})"
+                )
                 return job
-        
+
         logger.warning(f"No job found with ID: {job_id}")
         return None
-    
+
     except Exception as e:
         logger.error(f"Error fetching job by ID {job_id}: {e}")
         return None
@@ -61,16 +66,16 @@ def get_job_by_id(job_id: str) -> Optional[Dict[str, Any]]:
 def format_job_details(job: Dict[str, Any]) -> str:
     """
     Format job details into a readable string for the agent
-    
+
     Args:
         job: Job dictionary from API
-    
+
     Returns:
         Formatted string with job details
     """
     if not job:
         return "No job information available."
-    
+
     # Extract all available job details
     job_id = job.get("id", "N/A")
     job_title = job.get("job_title", "N/A")
@@ -91,13 +96,13 @@ def format_job_details(job: Dict[str, Any]) -> str:
     eligibility_criteria = job.get("Eligibility_Criteria", "N/A")
     screening_questions = job.get("Screening_Questions", "N/A")
     related_branch_id = job.get("related_branch_id", "N/A")
-    
+
     # Format perks/benefits
     if isinstance(perks_benefits, list):
         benefits_str = ", ".join(perks_benefits) if perks_benefits else "None specified"
     else:
         benefits_str = str(perks_benefits)
-    
+
     # Determine age requirement
     if age_18_above:
         age_req = "18 years or older"
@@ -105,7 +110,7 @@ def format_job_details(job: Dict[str, Any]) -> str:
         age_req = "16 years or older"
     else:
         age_req = "Not specified"
-    
+
     # Format the job details
     formatted = f"""
 === COMPLETE JOB DETAILS ===
@@ -143,41 +148,41 @@ SCREENING QUESTIONS:
 
 ===========================
 """
-    
+
     return formatted
 
 
 def get_job_summary(job: Dict[str, Any]) -> str:
     """
     Get a concise summary of the job for system prompt
-    
+
     Args:
         job: Job dictionary from API
-    
+
     Returns:
         Brief job summary
     """
     if not job:
         return "No job information available."
-    
+
     # Determine age requirement
     age_18_above = job.get("Age_18_Above", False)
     age_16_above = job.get("Age_16_above", False)
-    
+
     if age_18_above:
         age_req = "18+"
     elif age_16_above:
         age_req = "16+"
     else:
         age_req = "Not specified"
-    
+
     # Format perks/benefits
     perks_benefits = job.get("Perks_Benefits", [])
     if isinstance(perks_benefits, list):
         benefits_str = ", ".join(perks_benefits) if perks_benefits else "None"
     else:
         benefits_str = str(perks_benefits)
-    
+
     summary = f"""
 JOB OVERVIEW:
 - Title: {job.get('job_title', 'N/A')}
@@ -192,5 +197,5 @@ JOB OVERVIEW:
 - Perks/Benefits: {benefits_str}
 - Description: {job.get('description', 'N/A')[:200]}...
 """
-    
+
     return summary

@@ -2,12 +2,14 @@
 Prompts Configuration for Cleo RAG Agent
 Contains system prompts and stage-specific prompts for each conversation stage
 """
+
 from enum import Enum
 from typing import Dict
 
 
 class ConversationStage(Enum):
     """Conversation stages"""
+
     ENGAGEMENT = "engagement"
     QUALIFICATION = "qualification"
     APPLICATION = "application"
@@ -17,7 +19,7 @@ class ConversationStage(Enum):
 
 class CleoPrompts:
     """Central repository for all Cleo agent prompts"""
-    
+
     # Base System Prompt - Sets overall tone and behavior
     SYSTEM_PROMPT = """SYSTEM PROMPT:
 
@@ -75,9 +77,23 @@ If they don't meet a requirement, respond kindly and suggest alternatives ("That
 
 Querying and memory handling
 
-Before answering questions about jobs, policies, or benefits, decide whether to query the knowledge base.
+🏢 IMPORTANT: The knowledge base contains COMPANY DOCUMENTS from the hiring company. These documents include:
+- Company policies and procedures
+- Job descriptions and requirements
+- Benefits and compensation information
+- Company culture and values
+- Training materials and procedures
+- Any other company-specific information
 
-Use the query_knowledge_base tool for factual details.
+When users have questions about:
+- Job requirements or responsibilities
+- Company policies or procedures  
+- Benefits, salary, or compensation
+- Work environment or company culture
+- Training or onboarding processes
+- Any ambiguity about the role or company
+
+ALWAYS query the knowledge base first using query_knowledge_base tool to provide accurate, company-specific information.
 
 Use save_state for saving key conversation milestones (e.g., when user starts application, shares resume, or agrees to proceed).
 
@@ -231,7 +247,6 @@ Once they express readiness (yes, sure, okay, let's go, ready, etc.), say someth
 "Awesome! Let's get started then! 🎉 First, I just need to ask a few quick questions to make 
 sure this position is a good fit. Don't worry, nothing scary - just the basics. Here we go..."
 """,
-
         ConversationStage.QUALIFICATION: """
 ✅ QUALIFICATION STAGE - Verifying Basic Requirements
 
@@ -297,7 +312,6 @@ Once qualified, say something like:
 "Excellent! You meet all the basic requirements for this position. Now let's talk about your 
 experience and skills in more detail. This helps us understand how well you'd fit with the role..."
 """,
-
         ConversationStage.APPLICATION: """
 📝 APPLICATION STAGE - Collecting Detailed Information
 
@@ -382,7 +396,6 @@ Once information is collected and fit assessed:
 [fit assessment]. You're almost done - the last step is verification to confirm 
 your identity and documents. It's quick and secure..."
 """,
-
         ConversationStage.VERIFICATION: """
 🔐 VERIFICATION STAGE - Identity & Document Verification
 
@@ -444,7 +457,7 @@ Thank you for your interest in joining our team! Do you have any questions befor
 
 USE KNOWLEDGE BASE:
 Query for specific verification requirements, timelines, and next steps.
-"""
+""",
     }
 
     @classmethod
@@ -453,26 +466,24 @@ Query for specific verification requirements, timelines, and next steps.
         session_id: str,
         current_stage: ConversationStage,
         language: str = "en",
-        job_context: str = ""
+        job_context: str = "",
     ) -> str:
         """
         Get the complete system prompt for the current stage
-        
+
         Args:
             session_id: Current session ID
             current_stage: Current conversation stage
             language: Language code (en, es, etc.)
             job_context: Job details context (if available)
-        
+
         Returns:
             Complete system prompt with stage-specific instructions
         """
         base_prompt = cls.SYSTEM_PROMPT.format(
-            session_id=session_id,
-            current_stage=current_stage.value,
-            language=language
+            session_id=session_id, current_stage=current_stage.value, language=language
         )
-        
+
         # Add job context if available
         if job_context:
             job_instructions = f"""
@@ -506,29 +517,26 @@ ASSESSMENT APPROACH:
 - Be honest but encouraging about their fit for the role
 """
             base_prompt = base_prompt + job_instructions
-        
+
         stage_prompt = cls.STAGE_PROMPTS.get(
             current_stage,
-            "Continue the conversation naturally and guide the applicant appropriately."
+            "Continue the conversation naturally and guide the applicant appropriately.",
         )
-        
+
         return f"{base_prompt}\n\n{stage_prompt}"
 
     @classmethod
     def get_stage_prompt(cls, stage: ConversationStage) -> str:
         """
         Get only the stage-specific prompt
-        
+
         Args:
             stage: Conversation stage
-        
+
         Returns:
             Stage-specific prompt
         """
-        return cls.STAGE_PROMPTS.get(
-            stage,
-            "Continue the conversation naturally."
-        )
+        return cls.STAGE_PROMPTS.get(stage, "Continue the conversation naturally.")
 
 
 # Multilingual Support - Additional prompts for different languages
@@ -536,24 +544,24 @@ LANGUAGE_PROMPTS = {
     "es": {
         "greeting": "¡Hola! 👋 Soy Cleo, tu asistente de IA.",
         "consent": "¿Estás listo para comenzar?",
-        "thanks": "¡Gracias por tu interés!"
+        "thanks": "¡Gracias por tu interés!",
     },
     "en": {
         "greeting": "Hi there! 👋 I'm Cleo, your AI assistant.",
         "consent": "Are you ready to begin?",
-        "thanks": "Thank you for your interest!"
-    }
+        "thanks": "Thank you for your interest!",
+    },
 }
 
 
 def get_language_prompt(language: str, key: str) -> str:
     """
     Get a language-specific prompt
-    
+
     Args:
         language: Language code (en, es, etc.)
         key: Prompt key
-    
+
     Returns:
         Localized prompt string
     """

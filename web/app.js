@@ -55,6 +55,8 @@ const calculateFitScoreButton = document.getElementById('calculateFitScoreButton
 const documentUploadForm = document.getElementById('documentUploadForm');
 const documentFile = document.getElementById('documentFile');
 const fileDisplayText = document.getElementById('fileDisplayText');
+const fileBrowseButton = document.getElementById('fileBrowseButton');
+const companyName = document.getElementById('companyName');
 const documentType = document.getElementById('documentType');
 const jobType = document.getElementById('jobType');
 const documentSection = document.getElementById('documentSection');
@@ -732,6 +734,14 @@ function handleFileSelection() {
     }
 }
 
+function handleBrowseClick() {
+    documentFile.click();
+}
+
+function handleFileInputDisplayClick() {
+    documentFile.click();
+}
+
 function showUploadProgress(show) {
     uploadProgress.style.display = show ? 'block' : 'none';
     uploadButton.disabled = show;
@@ -787,6 +797,7 @@ function resetUploadForm() {
     documentUploadForm.reset();
     fileDisplayText.textContent = 'Choose PDF file...';
     fileDisplayText.classList.remove('file-selected');
+    companyName.value = '';
     documentType.value = '';
     jobType.value = 'general';
     documentSection.value = 'general';
@@ -889,6 +900,8 @@ calculateFitScoreButton.addEventListener('click', handleCalculateFitScore);
 // Document upload event listeners
 documentUploadForm.addEventListener('submit', handleDocumentUpload);
 documentFile.addEventListener('change', handleFileSelection);
+fileBrowseButton.addEventListener('click', handleBrowseClick);
+document.querySelector('.file-input-display').addEventListener('click', handleFileInputDisplayClick);
 refreshDocumentsButton.addEventListener('click', loadUploadedDocuments);
 
 // Load jobs and documents on page load

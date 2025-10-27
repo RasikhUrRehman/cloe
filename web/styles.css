@@ -461,12 +461,15 @@ body {
     display: flex;
     flex-direction: column;
     background: var(--bg-color);
+    height: 100vh;
+    position: relative;
 }
 
 .chat-header {
     padding: 1.5rem 2rem;
     background: var(--surface-color);
     border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
 }
 
 .chat-header h1 {
@@ -483,6 +486,7 @@ body {
     flex: 1;
     overflow-y: auto;
     padding: 2rem;
+    padding-bottom: 120px; /* Space for fixed input container */
     display: flex;
     flex-direction: column;
     gap: 1.5rem;
@@ -546,9 +550,14 @@ body {
 }
 
 .chat-input-container {
+    position: fixed;
+    bottom: 0;
+    right: 0;
+    width: calc(100% - 320px); /* Account for sidebar width */
     padding: 1.5rem 2rem;
     background: var(--surface-color);
     border-top: 1px solid var(--border-color);
+    z-index: 1000;
 }
 
 .typing-indicator {
@@ -672,6 +681,10 @@ body {
 
     .sidebar {
         display: none;
+    }
+
+    .chat-input-container {
+        width: 100% !important; /* Full width on mobile when sidebar is hidden */
     }
 
     .landing-title {
@@ -892,6 +905,22 @@ body {
 
 .file-browse-button:hover {
     background: var(--primary-dark);
+}
+
+.upload-input {
+    background: var(--surface-color);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 0.75rem;
+    color: var(--text-primary);
+    font-size: 0.875rem;
+    transition: all 0.2s ease;
+}
+
+.upload-input:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
 }
 
 .upload-select {

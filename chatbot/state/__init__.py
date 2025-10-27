@@ -1,14 +1,15 @@
 """
 State management modules
 """
+
 from chatbot.state.states import (
-    SessionState,
+    ApplicationState,
+    ConversationStage,
     EngagementState,
     QualificationState,
-    ApplicationState,
+    SessionState,
+    StateManager,
     VerificationState,
-    ConversationStage,
-    StateManager
 )
 
 __all__ = [
