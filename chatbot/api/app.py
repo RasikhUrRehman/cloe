@@ -119,6 +119,21 @@ class DocumentUploadResponse(BaseModel):
     timestamp: str
 
 
+
+@app.get("/", response_model=HealthResponse)
+@app.head("/")
+def read_root() -> HealthResponse:
+    """Health endpoint that supports GET and HEAD on root path
+
+    Returns basic status information used by load-balancers and health checks.
+    """
+    return HealthResponse(
+        status="ok",
+        version=settings.APP_VERSION,
+        timestamp=datetime.utcnow().isoformat(),
+    )
+
+
 class DocumentListResponse(BaseModel):
     """Response model for listing documents"""
 
