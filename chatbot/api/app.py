@@ -93,7 +93,23 @@ class SessionStatusResponse(BaseModel):
     engagement_complete: bool
     qualification_complete: bool
     application_complete: bool
-    verification_complete: bool
+    ready_for_verification: bool
+
+
+class SessionDetailsResponse(BaseModel):
+    """Response model for complete session details"""
+
+    session_id: str
+    current_stage: str
+    created_at: str
+    updated_at: str
+    engagement: Optional[Dict[str, Any]] = None
+    qualification: Optional[Dict[str, Any]] = None
+    application: Optional[Dict[str, Any]] = None
+    verification: Optional[Dict[str, Any]] = None
+    chat_history: List[Dict[str, str]] = []
+    job_details: Optional[Dict[str, Any]] = None
+    status: Dict[str, bool]
 
 
 class HealthResponse(BaseModel):
@@ -435,13 +451,89 @@ async def get_session_status(session_id: str):
             engagement_complete=summary["engagement_complete"],
             qualification_complete=summary["qualification_complete"],
             application_complete=summary["application_complete"],
-            verification_complete=summary["verification_complete"],
+            ready_for_verification=summary["ready_for_verification"],
         )
 
     except Exception as e:
         logger.error(f"Error getting session status: {e}")
         raise HTTPException(
             status_code=500, detail=f"Failed to get session status: {str(e)}"
+        )
+
+
+@app.get("/api/v1/session/{session_id}", response_model=SessionDetailsResponse)
+async def get_session_details(session_id: str):
+    """
+    Get complete session details including chat history, job details, and all state information
+
+    Args:
+        session_id: Session ID
+
+    Returns:
+        Complete session details
+    """
+    try:
+        # Get or create agent
+        agent = get_or_create_agent(session_id)
+
+        # Get conversation summary
+        summary = agent.get_conversation_summary()
+
+        # Get chat history from memory
+        chat_history = []
+        if agent.memory and hasattr(agent.memory, 'chat_memory'):
+            for message in agent.memory.chat_memory.messages:
+                chat_history.append({
+                    "role": "human" if message.type == "human" else "ai",
+                    "content": message.content,
+                    "timestamp": getattr(message, 'timestamp', None)
+                })
+
+        # Prepare state data
+        engagement_data = None
+        if agent.session_state.engagement:
+            engagement_data = agent.session_state.engagement.model_dump()
+
+        qualification_data = None
+        if agent.session_state.qualification:
+            qualification_data = agent.session_state.qualification.model_dump()
+
+        application_data = None
+        if agent.session_state.application:
+            application_data = agent.session_state.application.model_dump()
+
+        verification_data = None
+        if agent.session_state.verification:
+            verification_data = agent.session_state.verification.model_dump()
+
+        # Get job details if available
+        job_details = None
+        if agent.session_state.engagement and agent.session_state.engagement.job_details:
+            job_details = agent.session_state.engagement.job_details
+
+        return SessionDetailsResponse(
+            session_id=agent.session_state.session_id,
+            current_stage=agent.session_state.current_stage.value,
+            created_at=agent.session_state.created_at,
+            updated_at=agent.session_state.updated_at,
+            engagement=engagement_data,
+            qualification=qualification_data,
+            application=application_data,
+            verification=verification_data,
+            chat_history=chat_history,
+            job_details=job_details,
+            status={
+                "engagement_complete": summary["engagement_complete"],
+                "qualification_complete": summary["qualification_complete"],
+                "application_complete": summary["application_complete"],
+                "ready_for_verification": summary["ready_for_verification"],
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"Error getting session details: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to get session details: {str(e)}"
         )
 
 
@@ -538,11 +630,21 @@ async def get_fit_score(session_id: str):
         # Calculate current fit score
         from chatbot.utils.fit_score import FitScoreCalculator
 
-        calculator = FitScoreCalculator()
+        # Get chat history
+        chat_history = []
+        if agent.memory and hasattr(agent.memory, 'chat_memory'):
+            for message in agent.memory.chat_memory.messages:
+                chat_history.append({
+                    "role": "human" if message.type == "human" else "ai",
+                    "content": message.content,
+                })
+
+        calculator = FitScoreCalculator(llm=agent.llm)
 
         fit_score = calculator.calculate_fit_score(
             qualification=agent.session_state.qualification,
             application=agent.session_state.application,
+            chat_history=chat_history,
             verification=agent.session_state.verification,
         )
 
@@ -569,7 +671,7 @@ async def get_fit_score(session_id: str):
                 "rating": calculator.get_fit_rating(fit_score.total_score),
                 "qualification_score": fit_score.qualification_score,
                 "experience_score": fit_score.experience_score,
-                "verification_score": fit_score.verification_score,
+                "personality_score": fit_score.personality_score,
                 "breakdown": fit_score.breakdown,
             },
             "reports": reports_path,
@@ -613,10 +715,20 @@ async def calculate_fit_score(session_id: str):
         from chatbot.utils.fit_score import FitScoreCalculator
         from chatbot.utils.report_generator import ReportGenerator
 
-        calculator = FitScoreCalculator()
+        # Get chat history
+        chat_history = []
+        if agent.memory and hasattr(agent.memory, 'chat_memory'):
+            for message in agent.memory.chat_memory.messages:
+                chat_history.append({
+                    "role": "human" if message.type == "human" else "ai",
+                    "content": message.content,
+                })
+
+        calculator = FitScoreCalculator(llm=agent.llm)
         fit_score = calculator.calculate_fit_score(
             qualification=agent.session_state.qualification,
             application=agent.session_state.application,
+            chat_history=chat_history,
             verification=agent.session_state.verification,
         )
 
@@ -658,7 +770,8 @@ async def calculate_fit_score(session_id: str):
                 "rating": calculator.get_fit_rating(fit_score.total_score),
                 "qualification_score": fit_score.qualification_score,
                 "experience_score": fit_score.experience_score,
-                "verification_score": fit_score.verification_score,
+                "personality_score": fit_score.personality_score,
+                "breakdown": fit_score.breakdown,
             },
             "reports": reports,
             "stage_updated": True,

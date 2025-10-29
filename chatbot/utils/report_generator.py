@@ -181,7 +181,7 @@ class ReportGenerator:
                 "rating": self.fit_calculator.get_fit_rating(fit_score.total_score),
                 "qualification_score": round(fit_score.qualification_score, 2),
                 "experience_score": round(fit_score.experience_score, 2),
-                "verification_score": round(fit_score.verification_score, 2),
+                "personality_score": round(fit_score.personality_score, 2),
                 "breakdown": fit_score.breakdown,
             }
 
@@ -368,7 +368,7 @@ class ReportGenerator:
             )
             story.append(
                 Paragraph(
-                    f"<b>Verification Score:</b> {fit['verification_score']}/100",
+                    f"<b>Personality Score:</b> {fit['personality_score']}/100",
                     styles["Normal"],
                 )
             )

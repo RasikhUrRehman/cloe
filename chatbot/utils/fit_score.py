@@ -1,10 +1,10 @@
 """
 Fit Score Computation Module
-Calculates candidate fit score based on qualification, experience, and verification
+Calculates candidate fit score based on qualification, experience, and personality
 """
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from chatbot.state.states import ApplicationState, QualificationState, VerificationState
 from chatbot.utils.config import settings
@@ -19,7 +19,7 @@ class FitScoreComponents:
 
     qualification_score: float
     experience_score: float
-    verification_score: float
+    personality_score: float
     total_score: float
     breakdown: Dict[str, Any]
 
@@ -31,7 +31,8 @@ class FitScoreCalculator:
         self,
         qualification_weight: float = None,
         experience_weight: float = None,
-        verification_weight: float = None,
+        personality_weight: float = None,
+        llm=None,
     ):
         """
         Initialize fit score calculator with weights
@@ -39,25 +40,23 @@ class FitScoreCalculator:
         Args:
             qualification_weight: Weight for qualification score (default from settings)
             experience_weight: Weight for experience score (default from settings)
-            verification_weight: Weight for verification score (default from settings)
+            personality_weight: Weight for personality analysis (default from settings)
+            llm: Language model for personality analysis
         """
         self.qualification_weight = (
             qualification_weight or settings.QUALIFICATION_WEIGHT
         )
         self.experience_weight = experience_weight or settings.EXPERIENCE_WEIGHT
-        self.verification_weight = verification_weight or settings.VERIFICATION_WEIGHT
+        self.personality_weight = personality_weight or settings.PERSONALITY_WEIGHT
+        self.llm = llm
 
         # Ensure weights sum to 1.0
-        total = (
-            self.qualification_weight
-            + self.experience_weight
-            + self.verification_weight
-        )
+        total = self.qualification_weight + self.experience_weight + self.personality_weight
         if abs(total - 1.0) > 0.01:
             logger.warning(f"Weights sum to {total}, normalizing...")
             self.qualification_weight /= total
             self.experience_weight /= total
-            self.verification_weight /= total
+            self.personality_weight /= total
 
     def calculate_qualification_score(
         self, qualification: QualificationState
@@ -242,24 +241,144 @@ class FitScoreCalculator:
             "verified": verification.verification_status == "verified",
         }
 
+    def analyze_personality(self, chat_history: List[Dict[str, str]]) -> Dict[str, Any]:
+        """
+        Analyze personality traits from conversation using LLM
+        
+        Args:
+            chat_history: List of conversation messages
+            
+        Returns:
+            Dictionary with personality score and traits
+        """
+        if not self.llm or not chat_history:
+            logger.warning("No LLM or chat history provided for personality analysis")
+            return {"score": 50.0, "breakdown": {}, "traits": []}
+        
+        # Extract user messages
+        user_messages = [msg['content'] for msg in chat_history if msg.get('role') == 'human']
+        
+        if not user_messages:
+            return {"score": 50.0, "breakdown": {}, "traits": []}
+        
+        # Create analysis prompt
+        conversation_text = "\n".join([f"User: {msg}" for msg in user_messages])
+        
+        analysis_prompt = f"""Analyze the following conversation messages from a job applicant and evaluate their personality traits for workplace suitability. 
+
+Conversation:
+{conversation_text}
+
+Evaluate the applicant on the following dimensions (score each 0-20 points):
+1. Communication Skills: Clarity, professionalism, and articulation
+2. Enthusiasm & Motivation: Interest and eagerness for the position
+3. Professionalism: Courteous, respectful, and appropriate responses
+4. Responsiveness: Clear, direct answers to questions
+5. Attitude: Positive, cooperative demeanor
+
+Provide your analysis in this exact format:
+COMMUNICATION: [score]/20 - [brief reasoning]
+ENTHUSIASM: [score]/20 - [brief reasoning]
+PROFESSIONALISM: [score]/20 - [brief reasoning]
+RESPONSIVENESS: [score]/20 - [brief reasoning]
+ATTITUDE: [score]/20 - [brief reasoning]
+OVERALL_TRAITS: [comma-separated list of 3-5 key positive traits]
+
+Be objective and base your scoring on evidence from the messages."""
+
+        try:
+            # Get LLM analysis
+            response = self.llm.invoke(analysis_prompt)
+            analysis_text = response.content if hasattr(response, 'content') else str(response)
+            
+            # Parse the response
+            breakdown = {}
+            traits = []
+            total_score = 0
+            
+            lines = analysis_text.strip().split('\n')
+            for line in lines:
+                line = line.strip()
+                if line.startswith('COMMUNICATION:'):
+                    score = self._extract_score(line)
+                    breakdown['communication'] = score
+                    total_score += score
+                elif line.startswith('ENTHUSIASM:'):
+                    score = self._extract_score(line)
+                    breakdown['enthusiasm'] = score
+                    total_score += score
+                elif line.startswith('PROFESSIONALISM:'):
+                    score = self._extract_score(line)
+                    breakdown['professionalism'] = score
+                    total_score += score
+                elif line.startswith('RESPONSIVENESS:'):
+                    score = self._extract_score(line)
+                    breakdown['responsiveness'] = score
+                    total_score += score
+                elif line.startswith('ATTITUDE:'):
+                    score = self._extract_score(line)
+                    breakdown['attitude'] = score
+                    total_score += score
+                elif line.startswith('OVERALL_TRAITS:'):
+                    traits_text = line.split(':', 1)[1].strip()
+                    traits = [t.strip() for t in traits_text.split(',')]
+            
+            # Normalize to 0-100
+            final_score = (total_score / 100) * 100 if breakdown else 50.0
+            
+            logger.info(f"Personality score: {final_score:.2f}/100 with traits: {traits}")
+            
+            return {
+                "score": final_score,
+                "breakdown": breakdown,
+                "traits": traits
+            }
+            
+        except Exception as e:
+            logger.error(f"Error analyzing personality: {e}")
+            return {
+                "score": 50.0,
+                "breakdown": {},
+                "traits": [],
+                "error": str(e)
+            }
+    
+    def _extract_score(self, line: str) -> float:
+        """Extract numerical score from analysis line"""
+        try:
+            # Look for pattern like "15/20" or "15 /20" or "15"
+            import re
+            match = re.search(r'(\d+)\s*/?\s*20', line)
+            if match:
+                return float(match.group(1))
+            # Fallback: look for any number
+            match = re.search(r'(\d+)', line)
+            if match:
+                return min(float(match.group(1)), 20)
+            return 10.0  # Default middle score
+        except:
+            return 10.0
+
     def calculate_fit_score(
         self,
         qualification: Optional[QualificationState] = None,
         application: Optional[ApplicationState] = None,
+        chat_history: Optional[List[Dict[str, str]]] = None,
         verification: Optional[VerificationState] = None,
     ) -> FitScoreComponents:
         """
-        Calculate overall fit score from all components
+        Calculate overall fit score from all components including personality analysis
 
         Args:
             qualification: QualificationState object
             application: ApplicationState object
-            verification: VerificationState object
+            chat_history: Conversation history for personality analysis
+            verification: Not used - verification out of scope
 
         Returns:
             FitScoreComponents with all scores and breakdown
         """
-        # Calculate individual scores
+        # Calculate individual scores (qual, experience, and personality)
         qual_result = (
             self.calculate_qualification_score(qualification)
             if qualification
@@ -270,21 +389,21 @@ class FitScoreCalculator:
             if application
             else {"score": 0, "breakdown": {}}
         )
-        ver_result = (
-            self.calculate_verification_score(verification)
-            if verification
-            else {"score": 0, "breakdown": {}}
+        personality_result = (
+            self.analyze_personality(chat_history)
+            if chat_history and self.llm
+            else {"score": 50.0, "breakdown": {}, "traits": []}
         )
 
         qualification_score = qual_result["score"]
         experience_score = exp_result["score"]
-        verification_score = ver_result["score"]
+        personality_score = personality_result["score"]
 
         # Calculate weighted total
         total_score = (
             qualification_score * self.qualification_weight
             + experience_score * self.experience_weight
-            + verification_score * self.verification_weight
+            + personality_score * self.personality_weight
         )
 
         # Create detailed breakdown
@@ -301,20 +420,21 @@ class FitScoreCalculator:
                 "weighted_score": experience_score * self.experience_weight,
                 "details": exp_result["breakdown"],
             },
-            "verification": {
-                "score": verification_score,
-                "weight": self.verification_weight,
-                "weighted_score": verification_score * self.verification_weight,
-                "details": ver_result["breakdown"],
+            "personality": {
+                "score": personality_score,
+                "weight": self.personality_weight,
+                "weighted_score": personality_score * self.personality_weight,
+                "details": personality_result["breakdown"],
+                "traits": personality_result.get("traits", []),
             },
         }
 
-        logger.info(f"Total fit score: {total_score:.2f}/100")
+        logger.info(f"Total fit score: {total_score:.2f}/100 (Qualification: {qualification_score:.2f}, Experience: {experience_score:.2f}, Personality: {personality_score:.2f})")
 
         return FitScoreComponents(
             qualification_score=qualification_score,
             experience_score=experience_score,
-            verification_score=verification_score,
+            personality_score=personality_score,
             total_score=total_score,
             breakdown=breakdown,
         )

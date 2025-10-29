@@ -152,7 +152,7 @@ function updateSessionStatus(status) {
     updateProgressItem(engagementProgress, status.engagement_complete);
     updateProgressItem(qualificationProgress, status.qualification_complete);
     updateProgressItem(applicationProgress, status.application_complete);
-    updateProgressItem(verificationProgress, status.verification_complete);
+    updateProgressItem(verificationProgress, status.ready_for_verification);
     
     // Show fit score section if application is complete
     if (status.application_complete) {
@@ -189,10 +189,13 @@ async function updateFitScore() {
             const ratingClass = score.rating.toLowerCase().replace(' ', '-');
             fitScoreRating.classList.add(ratingClass);
             
-            // Update breakdown scores
+            // Update breakdown scores (verification removed - out of scope)
             qualificationScore.textContent = Math.round(score.qualification_score);
             experienceScore.textContent = Math.round(score.experience_score);
-            verificationScore.textContent = Math.round(score.verification_score);
+            // Verification score removed - not in project scope
+            if (verificationScore) {
+                verificationScore.textContent = 'N/A';
+            }
             
             // Hide calculate button since score is available
             calculateFitScoreButton.style.display = 'none';

@@ -1042,13 +1042,26 @@ class CleoRAGAgent:
         try:
             from chatbot.utils.fit_score import FitScoreCalculator
             from chatbot.utils.report_generator import ReportGenerator
+            import json
+            import os
 
-            calculator = FitScoreCalculator()
+            # Get chat history for personality analysis
+            chat_history = []
+            if self.memory and hasattr(self.memory, 'chat_memory'):
+                for message in self.memory.chat_memory.messages:
+                    chat_history.append({
+                        "role": "human" if message.type == "human" else "ai",
+                        "content": message.content,
+                    })
 
-            # Calculate fit score
+            # Pass LLM for personality analysis
+            calculator = FitScoreCalculator(llm=self.llm)
+
+            # Calculate fit score with personality analysis
             fit_score = calculator.calculate_fit_score(
                 qualification=self.session_state.qualification,
                 application=self.session_state.application,
+                chat_history=chat_history,
                 verification=self.session_state.verification,
             )
 
@@ -1062,11 +1075,44 @@ class CleoRAGAgent:
 
             logger.info(f"Reports generated: {reports}")
 
-            # The fit score and reports are now available and will be posted to web interface
-            # via the existing API endpoints
+            # Save application as JSON file
+            application_data = {
+                "session_id": self.session_state.session_id,
+                "timestamp": self.session_state.updated_at,
+                "job": self.session_state.engagement.job_details if self.session_state.engagement else None,
+                "applicant": {
+                    "name": self.session_state.application.full_name,
+                    "phone": self.session_state.application.phone_number,
+                    "email": self.session_state.application.email,
+                    "address": self.session_state.application.address,
+                },
+                "qualification": self.session_state.qualification.model_dump() if self.session_state.qualification else None,
+                "application": self.session_state.application.model_dump() if self.session_state.application else None,
+                "fit_score": {
+                    "total_score": fit_score.total_score,
+                    "qualification_score": fit_score.qualification_score,
+                    "experience_score": fit_score.experience_score,
+                    "personality_score": fit_score.personality_score,
+                    "rating": calculator.get_fit_rating(fit_score.total_score),
+                    "breakdown": fit_score.breakdown,
+                },
+                "status": "completed",
+            }
+
+            # Save to JSON file
+            applications_dir = "./applications"
+            os.makedirs(applications_dir, exist_ok=True)
+            application_file = os.path.join(applications_dir, f"application_{self.session_state.session_id}.json")
+            
+            with open(application_file, 'w') as f:
+                json.dump(application_data, f, indent=2, default=str)
+            
+            logger.info(f"Application saved to: {application_file}")
 
         except Exception as e:
             logger.error(f"Error calculating fit score: {e}")
+            import traceback
+            traceback.print_exc()
             # Don't let fit score calculation failure prevent state progression
 
     def get_conversation_summary(self) -> Dict[str, Any]:
@@ -1089,9 +1135,9 @@ class CleoRAGAgent:
                 if self.session_state.application
                 else False
             ),
-            "verification_complete": (
-                self.session_state.verification.stage_completed
-                if self.session_state.verification
+            "ready_for_verification": (
+                self.session_state.application.stage_completed
+                if self.session_state.application
                 else False
             ),
         }

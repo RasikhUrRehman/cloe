@@ -303,8 +303,8 @@ class StateManager:
             "application_complete": (
                 state.application.stage_completed if state.application else False
             ),
-            "verification_complete": (
-                state.verification.stage_completed if state.verification else False
+            "ready_for_verification": (
+                state.application.stage_completed if state.application else False
             ),
             "created_at": state.created_at,
             "updated_at": state.updated_at,
@@ -317,7 +317,7 @@ class StateManager:
             "engagement_complete",
             "qualification_complete",
             "application_complete",
-            "verification_complete",
+            "ready_for_verification",
             "created_at",
             "updated_at",
         ]

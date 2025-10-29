@@ -1,4 +1,4 @@
-session_id,current_stage,engagement,qualification,application,verification,created_at,updated_at
+session_id,current_stage,engagement_complete,qualification_complete,application_complete,ready_for_verification,created_at,updated_at
 eb8ca21e-a7c5-4e7c-b891-2fd7b920e38b,engagement,True,False,False,False,2025-10-25T09:20:00.534906,2025-10-25T09:53:15.794844
 fa277744-ac71-4a7e-809d-69a6cd41334d,engagement,True,False,False,False,2025-10-25T09:20:36.649694,2025-10-25T09:53:15.816136
 c8c63315-1efc-4a7d-8cec-511b0c6d8c3b,engagement,True,False,False,False,2025-10-25T09:46:33.799940,2025-10-25T09:53:15.834461

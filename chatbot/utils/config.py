@@ -40,10 +40,10 @@ class Settings(BaseSettings):
     SUPPORTED_LANGUAGES: str = "en,es"
     DEFAULT_LANGUAGE: str = "en"
 
-    # Fit Score Weights
+    # Fit Score Weights (Verification removed - out of scope, Personality added)
     QUALIFICATION_WEIGHT: float = 0.30
-    EXPERIENCE_WEIGHT: float = 0.40
-    VERIFICATION_WEIGHT: float = 0.30
+    EXPERIENCE_WEIGHT: float = 0.50
+    PERSONALITY_WEIGHT: float = 0.20  # Analyzes conversation for personality traits
 
     # File Storage Paths
     DATA_DIR: str = "./data"
