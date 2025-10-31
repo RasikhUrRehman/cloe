@@ -222,17 +222,21 @@ class StateManager:
                         existing_records.append(cleaned_data)
                         record_found = True
                     else:
-                        existing_records.append(row)
+                        # Clean existing row to only include current fieldnames
+                        cleaned_row = {}
+                        for field in fieldnames:
+                            cleaned_row[field] = row.get(field, "")
+                        existing_records.append(cleaned_row)
 
         # If record not found, add it
         if not record_found:
             existing_records.append(cleaned_data)
 
-        # Write all records back to file
+        # Write all records back to file with extrasaction='ignore' to handle any extra fields
         with tempfile.NamedTemporaryFile(
             mode="w", newline="", encoding="utf-8", delete=False
         ) as temp_file:
-            writer = csv.DictWriter(temp_file, fieldnames=fieldnames)
+            writer = csv.DictWriter(temp_file, fieldnames=fieldnames, extrasaction='ignore')
             writer.writeheader()
             writer.writerows(existing_records)
             temp_file_path = temp_file.name

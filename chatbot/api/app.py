@@ -19,7 +19,7 @@ from chatbot.core.retrievers import RetrievalMethod
 from chatbot.state.states import SessionState, StateManager
 from chatbot.utils.config import ensure_directories, settings
 from chatbot.utils.job_fetcher import get_job_by_id
-from chatbot.utils.utils import setup_logging
+from chatbot.utils.utils import get_current_timestamp, setup_logging
 
 # Initialize logging
 logger = setup_logging()
@@ -165,6 +165,43 @@ class DocumentDeleteResponse(BaseModel):
     deleted: bool
 
 
+class ApplicationResponse(BaseModel):
+    """Response model for application data"""
+    
+    session_id: str
+    timestamp: str
+    job: Optional[Dict[str, Any]] = None
+    applicant: Optional[Dict[str, Any]] = None
+    qualification: Optional[Dict[str, Any]] = None
+    application: Optional[Dict[str, Any]] = None
+    verification: Optional[Dict[str, Any]] = None
+    fit_score: Optional[Dict[str, Any]] = None
+    status: str
+
+
+class ApplicationSummary(BaseModel):
+    """Summary model for application list"""
+    
+    session_id: Optional[str] = None
+    timestamp: Optional[str] = None
+    applicant_name: Optional[str] = None
+    applicant_email: Optional[str] = None
+    job_title: Optional[str] = None
+    company: Optional[str] = None
+    status: Optional[str] = None
+    fit_score: Optional[float] = None
+    rating: Optional[str] = None
+
+
+class ApplicationListResponse(BaseModel):
+    """Response model for listing applications"""
+    
+    applications: List[ApplicationSummary]
+    total_count: int
+    limit: int
+    offset: int
+
+
 # Helper Functions
 def _validate_api_responses(responses: List[str]) -> List[str]:
     """
@@ -285,8 +322,9 @@ def get_or_create_agent(
 
             agent = CleoRAGAgent(session_state=session_state, retrieval_method=method)
         else:
-            # Create new agent
-            agent = CleoRAGAgent(retrieval_method=method)
+            # Create new agent with specified session_id
+            session_state = SessionState(session_id=session_id)
+            agent = CleoRAGAgent(session_state=session_state, retrieval_method=method)
 
         active_sessions[session_id] = agent
 
@@ -486,7 +524,7 @@ async def get_session_details(session_id: str):
                 chat_history.append({
                     "role": "human" if message.type == "human" else "ai",
                     "content": message.content,
-                    "timestamp": getattr(message, 'timestamp', None)
+                    "timestamp": getattr(message, 'timestamp', datetime.utcnow().isoformat())
                 })
 
         # Prepare state data
@@ -785,6 +823,160 @@ async def calculate_fit_score(session_id: str):
         logger.error(f"Error calculating fit score: {e}")
         raise HTTPException(
             status_code=500, detail=f"Failed to calculate fit score: {str(e)}"
+        )
+
+
+@app.get("/api/v1/session/{session_id}/application", response_model=ApplicationResponse)
+async def get_application(session_id: str):
+    """
+    Get the completed application data for a session
+
+    Args:
+        session_id: Session ID (can be with or without 'application_' prefix)
+
+    Returns:
+        Complete application data including applicant info, qualifications, 
+        fit score, and job details
+    """
+    try:
+        import json
+        import os
+
+        # Normalize session ID - remove 'application_' prefix if present
+        normalized_session_id = session_id.replace('application_', '')
+        
+        # Check if application JSON file exists
+        application_file = os.path.join("./applications", f"application_{normalized_session_id}.json")
+        
+        if not os.path.exists(application_file):
+            # Try to get from state manager as fallback
+            state_manager = StateManager()
+            
+            # Load individual states
+            engagement = state_manager.load_engagement(normalized_session_id)
+            qualification = state_manager.load_qualification(normalized_session_id)
+            application = state_manager.load_application(normalized_session_id)
+            verification = state_manager.load_verification(normalized_session_id)
+            
+            # Check if application exists
+            if not application:
+                raise HTTPException(
+                    status_code=404, 
+                    detail=f"No application found for session {normalized_session_id}"
+                )
+            
+            # Check if application is complete
+            if not application.stage_completed:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Application for session {normalized_session_id} is not yet complete"
+                )
+            
+            # Build application data from state
+            application_data = {
+                "session_id": normalized_session_id,
+                "timestamp": get_current_timestamp(),
+                "job": engagement.job_details if engagement else None,
+                "applicant": {
+                    "name": application.full_name,
+                    "phone": application.phone_number,
+                    "email": application.email,
+                    "address": application.address,
+                } if application else None,
+                "qualification": qualification.model_dump() if qualification else None,
+                "application": application.model_dump() if application else None,
+                "verification": verification.model_dump() if verification else None,
+                "fit_score": None,  # Fit score is only available in JSON file
+                "status": "completed" if application.stage_completed else "in_progress",
+            }
+            
+            return application_data
+        
+        # Load application from JSON file
+        with open(application_file, 'r') as f:
+            application_data = json.load(f)
+        
+        return application_data
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving application: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to retrieve application: {str(e)}"
+        )
+
+
+@app.get("/api/v1/applications", response_model=ApplicationListResponse)
+async def list_applications(limit: int = 100, offset: int = 0):
+    """
+    List all applications
+    
+    Args:
+        limit: Maximum number of applications to return (default: 100)
+        offset: Number of applications to skip (default: 0)
+    
+    Returns:
+        List of applications with basic info
+    """
+    try:
+        import json
+        import os
+        from pathlib import Path
+        
+        applications_dir = Path("./applications")
+        
+        if not applications_dir.exists():
+            return {
+                "applications": [],
+                "total_count": 0,
+                "limit": limit,
+                "offset": offset
+            }
+        
+        # Get all application JSON files
+        application_files = list(applications_dir.glob("application_*.json"))
+        total_count = len(application_files)
+        
+        # Sort by modification time (most recent first)
+        application_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+        
+        # Apply pagination
+        paginated_files = application_files[offset:offset + limit]
+        
+        applications = []
+        for app_file in paginated_files:
+            try:
+                with open(app_file, 'r') as f:
+                    app_data = json.load(f)
+                    
+                # Extract summary info
+                applications.append({
+                    "session_id": app_data.get("session_id"),
+                    "timestamp": app_data.get("timestamp"),
+                    "applicant_name": app_data.get("applicant", {}).get("name"),
+                    "applicant_email": app_data.get("applicant", {}).get("email"),
+                    "job_title": app_data.get("job", {}).get("title") if app_data.get("job") else None,
+                    "company": app_data.get("job", {}).get("company") if app_data.get("job") else None,
+                    "status": app_data.get("status", "unknown"),
+                    "fit_score": app_data.get("fit_score", {}).get("total_score") if app_data.get("fit_score") else None,
+                    "rating": app_data.get("fit_score", {}).get("rating") if app_data.get("fit_score") else None,
+                })
+            except Exception as e:
+                logger.error(f"Error reading application file {app_file}: {e}")
+                continue
+        
+        return {
+            "applications": applications,
+            "total_count": total_count,
+            "limit": limit,
+            "offset": offset
+        }
+        
+    except Exception as e:
+        logger.error(f"Error listing applications: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to list applications: {str(e)}"
         )
 
 

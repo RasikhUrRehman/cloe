@@ -32,7 +32,7 @@ from chatbot.state.states import (
 )
 from chatbot.utils.config import settings
 from chatbot.utils.job_fetcher import format_job_details
-from chatbot.utils.utils import setup_logging
+from chatbot.utils.utils import get_current_timestamp, setup_logging
 
 logger = setup_logging()
 
@@ -296,6 +296,10 @@ class CleoRAGAgent:
 
                     # Update conversation state based on response
                     self._update_state_from_conversation(user_message, agent_response)
+
+                    # Always save session state after processing to ensure persistence
+                    self.state_manager.save_session(self.session_state)
+                    logger.info(f"Session state saved after message processing")
 
                     logger.info(f"Successfully processed message on attempt {attempt + 1}")
                     return messages
@@ -754,7 +758,8 @@ class CleoRAGAgent:
             app = self.session_state.application
 
             # Extract application information using simple patterns
-            self._extract_application_info(user_message, app)
+            if self._extract_application_info(user_message, app):
+                state_changed = True
 
             # Check if application is complete and trigger fit score calculation
             if self._is_application_complete(app):
@@ -762,13 +767,14 @@ class CleoRAGAgent:
                     app.application_status = "submitted"
                     app.stage_completed = True
 
-                    # Calculate fit score and transition to verification
+                    # Calculate fit score and save application
                     self._calculate_and_save_fit_score()
 
-                    self.session_state.current_stage = ConversationStage.VERIFICATION
+                    # Transition to verification/completed stage
+                    self.session_state.current_stage = ConversationStage.COMPLETED
                     state_changed = True
                     logger.info(
-                        "Application completed - Fit score calculated - Moving to VERIFICATION stage"
+                        "Application completed - Fit score calculated - Moving to COMPLETED stage"
                     )
 
         # Verification stage updates
@@ -801,9 +807,15 @@ class CleoRAGAgent:
             ]
         )
 
-    def _extract_application_info(self, user_message: str, app: ApplicationState):
-        """Extract application information from user message"""
+    def _extract_application_info(self, user_message: str, app: ApplicationState) -> bool:
+        """Extract application information from user message
+        
+        Returns:
+            bool: True if any information was extracted and state changed
+        """
         import re
+
+        state_changed = False
 
         # Email pattern
         email_pattern = r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"
@@ -812,6 +824,7 @@ class CleoRAGAgent:
             if email_match:
                 app.email = email_match.group()
                 logger.info("Email captured")
+                state_changed = True
 
         # Phone pattern
         phone_pattern = (
@@ -822,6 +835,7 @@ class CleoRAGAgent:
             if phone_match:
                 app.phone_number = phone_match.group()
                 logger.info("Phone number captured")
+                state_changed = True
 
         # Name pattern (simple approach - look for "My name is" or similar)
         name_patterns = [
@@ -835,6 +849,7 @@ class CleoRAGAgent:
                 if name_match:
                     app.full_name = name_match.group(1).strip().title()
                     logger.info(f"Name captured: {app.full_name}")
+                    state_changed = True
                     break
 
         # Years of experience
@@ -844,6 +859,9 @@ class CleoRAGAgent:
             if exp_match:
                 app.years_experience = float(exp_match.group(1))
                 logger.info(f"Years of experience captured: {app.years_experience}")
+                state_changed = True
+
+        return state_changed
 
     def _is_application_complete(self, app: ApplicationState) -> bool:
         """Check if application stage is complete"""
@@ -856,10 +874,13 @@ class CleoRAGAgent:
             ]
         )
 
-    def _extract_information_proactively(self, user_message: str):
+    def _extract_information_proactively(self, user_message: str) -> bool:
         """
         Proactively extract information from user message regardless of current stage
         This helps capture information provided voluntarily by users
+        
+        Returns:
+            bool: True if any information was extracted and state was saved
         """
         import re
 
@@ -1036,6 +1057,8 @@ class CleoRAGAgent:
         if state_changed:
             self.state_manager.save_session(self.session_state)
             logger.info("Proactive information extraction completed - state saved")
+        
+        return state_changed
 
     def _calculate_and_save_fit_score(self):
         """Calculate fit score when application is complete"""
@@ -1067,18 +1090,22 @@ class CleoRAGAgent:
 
             logger.info(f"Fit score calculated: {fit_score.total_score:.2f}/100")
 
-            # Generate report
-            report_gen = ReportGenerator()
-            reports = report_gen.generate_report(
-                session_id=self.session_state.session_id, include_fit_score=True
-            )
-
-            logger.info(f"Reports generated: {reports}")
+            # Try to generate report (but don't fail if it errors)
+            reports = None
+            try:
+                report_gen = ReportGenerator()
+                reports = report_gen.generate_report(
+                    session_id=self.session_state.session_id, include_fit_score=True
+                )
+                logger.info(f"Reports generated: {reports}")
+            except Exception as report_error:
+                logger.warning(f"Could not generate reports: {report_error}")
+                # Continue to save application JSON even if reports fail
 
             # Save application as JSON file
             application_data = {
                 "session_id": self.session_state.session_id,
-                "timestamp": self.session_state.updated_at,
+                "timestamp": get_current_timestamp(),
                 "job": self.session_state.engagement.job_details if self.session_state.engagement else None,
                 "applicant": {
                     "name": self.session_state.application.full_name,
@@ -1088,6 +1115,7 @@ class CleoRAGAgent:
                 },
                 "qualification": self.session_state.qualification.model_dump() if self.session_state.qualification else None,
                 "application": self.session_state.application.model_dump() if self.session_state.application else None,
+                "verification": self.session_state.verification.model_dump() if self.session_state.verification else None,
                 "fit_score": {
                     "total_score": fit_score.total_score,
                     "qualification_score": fit_score.qualification_score,
@@ -1117,6 +1145,12 @@ class CleoRAGAgent:
 
     def get_conversation_summary(self) -> Dict[str, Any]:
         """Get summary of current conversation state"""
+        app_complete = (
+            self.session_state.application.stage_completed
+            if self.session_state.application
+            else False
+        )
+        
         return {
             "session_id": self.session_state.session_id,
             "current_stage": self.session_state.current_stage.value,
@@ -1130,16 +1164,8 @@ class CleoRAGAgent:
                 if self.session_state.qualification
                 else False
             ),
-            "application_complete": (
-                self.session_state.application.stage_completed
-                if self.session_state.application
-                else False
-            ),
-            "ready_for_verification": (
-                self.session_state.application.stage_completed
-                if self.session_state.application
-                else False
-            ),
+            "application_complete": app_complete,
+            "ready_for_verification": app_complete,
         }
 
     def reset_conversation(self):
