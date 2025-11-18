@@ -1,8 +1,9 @@
 """
 Utility modules
 """
-from chatbot.utils.config import settings, ensure_directories
-from chatbot.utils.utils import setup_logging, get_current_timestamp
+
+from chatbot.utils.config import ensure_directories, settings
+from chatbot.utils.utils import get_current_timestamp, setup_logging
 
 __all__ = [
     "settings",

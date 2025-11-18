@@ -37,6 +37,9 @@ uvicorn==0.30.6
 # === Logging ===
 loguru==0.7.3
 
+# === LangFuse Observability ===
+langfuse==2.29.0
+
 # === QR Code Generation ===
 qrcode==7.4.2
 Pillow==10.3.0
@@ -51,3 +54,4 @@ pytest-asyncio==0.23.6
 # === Typing & Linting ===
 mypy==1.10.0
 types-requests==2.31.0.6
+python-multipart

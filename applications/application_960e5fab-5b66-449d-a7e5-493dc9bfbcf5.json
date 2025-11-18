@@ -1,0 +1,107 @@
+{
+  "session_id": "960e5fab-5b66-449d-a7e5-493dc9bfbcf5",
+  "timestamp": "2025-10-29T18:38:21.823687",
+  "job": {
+    "title": "Warehouse Associate",
+    "company": "ABC Logistics",
+    "location": "Los Angeles, CA",
+    "type": "Full-time",
+    "shift": "Day shift (8am-5pm)",
+    "requirements": [
+      "Must be 18 years or older",
+      "Valid work authorization in the US",
+      "Ability to lift 50 lbs",
+      "Forklift certification preferred"
+    ],
+    "salary": "$18-22/hour",
+    "benefits": [
+      "Health insurance",
+      "401k",
+      "Paid time off"
+    ]
+  },
+  "applicant": {
+    "name": "John Smith",
+    "phone": " 555-123-4567",
+    "email": "john.smith@email.com",
+    "address": null
+  },
+  "qualification": {
+    "session_id": "960e5fab-5b66-449d-a7e5-493dc9bfbcf5",
+    "age_confirmed": true,
+    "work_authorization": true,
+    "shift_preference": "morning",
+    "availability_start": "I can start immediately",
+    "transportation": true,
+    "hours_preference": "full-time",
+    "qualification_status": "qualified",
+    "stage_completed": true
+  },
+  "application": {
+    "session_id": "960e5fab-5b66-449d-a7e5-493dc9bfbcf5",
+    "full_name": "John Smith",
+    "phone_number": " 555-123-4567",
+    "email": "john.smith@email.com",
+    "address": null,
+    "previous_employer": null,
+    "job_title": null,
+    "years_experience": 3.5,
+    "skills": null,
+    "references": null,
+    "communication_preference": null,
+    "application_status": "submitted",
+    "stage_completed": true
+  },
+  "fit_score": {
+    "total_score": 64.3,
+    "qualification_score": 100.0,
+    "experience_score": 35.0,
+    "personality_score": 84.0,
+    "rating": "Fair",
+    "breakdown": {
+      "qualification": {
+        "score": 100.0,
+        "weight": 0.3,
+        "weighted_score": 30.0,
+        "details": {
+          "age_confirmed": 20,
+          "work_authorization": 25,
+          "shift_preference": 15,
+          "availability": 20,
+          "transportation": 10,
+          "hours_preference": 10
+        }
+      },
+      "experience": {
+        "score": 35.0,
+        "weight": 0.5,
+        "weighted_score": 17.5,
+        "details": {
+          "years_experience": 35,
+          "previous_employer": 0,
+          "job_title": 0,
+          "skills": 0,
+          "references": 0
+        }
+      },
+      "personality": {
+        "score": 84.0,
+        "weight": 0.2,
+        "weighted_score": 16.8,
+        "details": {
+          "communication": 16.0,
+          "enthusiasm": 13.0,
+          "professionalism": 17.0,
+          "responsiveness": 20.0,
+          "attitude": 18.0
+        },
+        "traits": [
+          "Cooperative",
+          "Professional",
+          "Responsive"
+        ]
+      }
+    }
+  },
+  "status": "completed"
+}
