@@ -8,7 +8,6 @@ import time
 from datetime import datetime
 
 from chatbot.core.agent import CleoRAGAgent
-from chatbot.core.retrievers import RetrievalMethod
 from chatbot.state.states import ConversationStage
 from chatbot.utils.config import ensure_directories
 from chatbot.utils.fit_score import FitScoreCalculator
@@ -66,7 +65,7 @@ def test_complete_application_flow():
     
     # Create agent with job context
     print("Initializing agent with job context...")
-    agent = CleoRAGAgent(retrieval_method=RetrievalMethod.HYBRID)
+    agent = CleoRAGAgent()
     
     # Set a job for testing (simulate warehouse job)
     from chatbot.state.states import EngagementState

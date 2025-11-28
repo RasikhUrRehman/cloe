@@ -3,19 +3,16 @@ FastAPI Application for Cleo RAG Agent
 Provides REST API endpoints for chat interactions
 """
 
-import shutil
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from chatbot.core.agent import CleoRAGAgent
-from chatbot.core.ingestion import DocumentIngestion
-from chatbot.core.retrievers import RetrievalMethod
 from chatbot.state.states import SessionState, StateManager
 from chatbot.utils.config import ensure_directories, settings
 from chatbot.utils.job_fetcher import get_job_by_id
@@ -52,10 +49,6 @@ class SessionCreateRequest(BaseModel):
     """Request model for creating a new session"""
 
     job_id: Optional[str] = Field(default=None, description="Job ID to apply for")
-    retrieval_method: Optional[str] = Field(
-        default="hybrid",
-        description="Retrieval method: semantic, similarity, or hybrid",
-    )
     language: Optional[str] = Field(
         default="en", description="Language code (en, es, etc.)"
     )
@@ -120,21 +113,6 @@ class HealthResponse(BaseModel):
     timestamp: str
 
 
-class DocumentUploadResponse(BaseModel):
-    """Response model for document upload"""
-
-    message: str
-    document_id: str
-    filename: str
-    document_type: str
-    company_name: str
-    job_type: str
-    section: str
-    total_chunks: int
-    total_characters: int
-    timestamp: str
-
-
 
 @app.get("/", response_model=HealthResponse)
 @app.head("/")
@@ -148,21 +126,6 @@ def read_root() -> HealthResponse:
         version=settings.APP_VERSION,
         timestamp=datetime.utcnow().isoformat(),
     )
-
-
-class DocumentListResponse(BaseModel):
-    """Response model for listing documents"""
-
-    documents: List[Dict[str, Any]]
-    total_count: int
-
-
-class DocumentDeleteResponse(BaseModel):
-    """Response model for document deletion"""
-
-    message: str
-    document_id: str
-    deleted: bool
 
 
 class ApplicationResponse(BaseModel):
@@ -256,28 +219,17 @@ def _validate_api_responses(responses: List[str]) -> List[str]:
     return validated
 
 
-def get_or_create_agent(
-    session_id: str, retrieval_method: str = "hybrid"
-) -> CleoRAGAgent:
+def get_or_create_agent(session_id: str) -> CleoRAGAgent:
     """
     Get existing agent or create new one
 
     Args:
         session_id: Session ID
-        retrieval_method: Retrieval method to use
 
     Returns:
         CleoRAGAgent instance
     """
     if session_id not in active_sessions:
-        # Map string to enum
-        method_map = {
-            "semantic": RetrievalMethod.SEMANTIC,
-            "similarity": RetrievalMethod.SIMILARITY,
-            "hybrid": RetrievalMethod.HYBRID,
-        }
-        method = method_map.get(retrieval_method.lower(), RetrievalMethod.HYBRID)
-
         # Try to load existing session from storage
         state_manager = StateManager()
         engagement = state_manager.load_engagement(session_id)
@@ -320,11 +272,11 @@ def get_or_create_agent(
 
                 session_state.current_stage = ConversationStage.ENGAGEMENT
 
-            agent = CleoRAGAgent(session_state=session_state, retrieval_method=method)
+            agent = CleoRAGAgent(session_state=session_state)
         else:
             # Create new agent with specified session_id
             session_state = SessionState(session_id=session_id)
-            agent = CleoRAGAgent(session_state=session_state, retrieval_method=method)
+            agent = CleoRAGAgent(session_state=session_state)
 
         active_sessions[session_id] = agent
 
@@ -373,7 +325,7 @@ async def create_session(request: SessionCreateRequest):
                 )
 
         # Create agent
-        agent = get_or_create_agent(session_id, request.retrieval_method)
+        agent = get_or_create_agent(session_id)
 
         # Initialize engagement state with job details
         if not agent.session_state.engagement:
@@ -980,221 +932,13 @@ async def list_applications(limit: int = 100, offset: int = 0):
         )
 
 
-# Document Management Endpoints
-@app.post("/api/v1/documents/upload", response_model=DocumentUploadResponse)
-async def upload_document(
-    file: UploadFile = File(...),
-    document_type: str = Form(...),  # "company" or "job"
-    company_name: str = Form(default=""),  # Company name
-    job_type: str = Form(default="general"),
-    section: str = Form(default="general"),
-    background_tasks: BackgroundTasks = BackgroundTasks(),
-):
-    """
-    Upload a PDF document for the knowledge base
-
-    Args:
-        file: PDF file to upload
-        document_type: Type of document ("company" or "job")
-        company_name: Name of the company (optional)
-        job_type: Job category (e.g., "warehouse", "healthcare", "retail")
-        section: Document section (e.g., "company_info", "job_requirements", "benefits")
-
-    Returns:
-        Document upload response
-    """
-    try:
-        # Validate file type
-        if not file.filename.lower().endswith(".pdf"):
-            raise HTTPException(status_code=400, detail="Only PDF files are allowed")
-
-        # Validate document type
-        if document_type not in ["company", "job"]:
-            raise HTTPException(
-                status_code=400, detail="document_type must be 'company' or 'job'"
-            )
-
-        # Generate unique document ID
-        document_id = str(uuid.uuid4())
-
-        # Create upload directory if it doesn't exist
-        upload_dir = Path(settings.UPLOADS_DIR)
-        upload_dir.mkdir(parents=True, exist_ok=True)
-
-        # Save uploaded file
-        file_extension = Path(file.filename).suffix
-        company_part = f"_{company_name.replace(' ', '_')}" if company_name else ""
-        saved_filename = f"{document_id}_{document_type}{company_part}_{job_type}_{section}{file_extension}"
-        file_path = upload_dir / saved_filename
-
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-
-        logger.info(f"Saved uploaded file: {file_path}")
-
-        # Add background task to process the document
-        background_tasks.add_task(
-            process_uploaded_document,
-            str(file_path),
-            document_id,
-            file.filename,
-            document_type,
-            company_name,
-            job_type,
-            section,
-        )
-
-        return DocumentUploadResponse(
-            message="Document uploaded successfully and is being processed",
-            document_id=document_id,
-            filename=file.filename,
-            document_type=document_type,
-            company_name=company_name,
-            job_type=job_type,
-            section=section,
-            total_chunks=0,  # Will be updated after processing
-            total_characters=0,  # Will be updated after processing
-            timestamp=datetime.utcnow().isoformat(),
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error uploading document: {e}")
-        raise HTTPException(
-            status_code=500, detail=f"Failed to upload document: {str(e)}"
-        )
-
-
-@app.get("/api/v1/documents", response_model=DocumentListResponse)
-async def list_documents():
-    """
-    List all uploaded documents
-
-    Returns:
-        List of uploaded documents with their metadata
-    """
-    try:
-        upload_dir = Path(settings.UPLOADS_DIR)
-        documents = []
-
-        if upload_dir.exists():
-            for file_path in upload_dir.glob("*.pdf"):
-                # Parse filename to extract metadata
-                filename_parts = file_path.stem.split("_")
-                if len(filename_parts) >= 4:
-                    document_id = filename_parts[0]
-                    document_type = filename_parts[1]
-                    job_type = filename_parts[2]
-                    section = "_".join(
-                        filename_parts[3:]
-                    )  # Handle sections with underscores
-
-                    file_stats = file_path.stat()
-                    documents.append(
-                        {
-                            "document_id": document_id,
-                            "filename": file_path.name,
-                            "original_filename": file_path.name.replace(
-                                f"{document_id}_{document_type}_{job_type}_{section}_",
-                                "",
-                            ),
-                            "document_type": document_type,
-                            "job_type": job_type,
-                            "section": section,
-                            "file_size": file_stats.st_size,
-                            "upload_date": datetime.fromtimestamp(
-                                file_stats.st_ctime
-                            ).isoformat(),
-                        }
-                    )
-
-        return DocumentListResponse(documents=documents, total_count=len(documents))
-
-    except Exception as e:
-        logger.error(f"Error listing documents: {e}")
-        raise HTTPException(
-            status_code=500, detail=f"Failed to list documents: {str(e)}"
-        )
-
-
-@app.delete("/api/v1/documents/{document_id}", response_model=DocumentDeleteResponse)
-async def delete_document(document_id: str):
-    """
-    Delete an uploaded document
-
-    Args:
-        document_id: ID of the document to delete
-
-    Returns:
-        Document deletion response
-    """
-    try:
-        upload_dir = Path(settings.UPLOADS_DIR)
-        deleted = False
-
-        # Find and delete the file
-        for file_path in upload_dir.glob(f"{document_id}_*.pdf"):
-            file_path.unlink()
-            deleted = True
-            logger.info(f"Deleted document: {file_path}")
-            break
-
-        if not deleted:
-            raise HTTPException(status_code=404, detail="Document not found")
-
-        return DocumentDeleteResponse(
-            message="Document deleted successfully",
-            document_id=document_id,
-            deleted=True,
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error deleting document: {e}")
-        raise HTTPException(
-            status_code=500, detail=f"Failed to delete document: {str(e)}"
-        )
-
-
-async def process_uploaded_document(
-    file_path: str,
-    document_id: str,
-    original_filename: str,
-    document_type: str,
-    company_name: str,
-    job_type: str,
-    section: str,
-):
-    """
-    Background task to process uploaded document
-    """
-    try:
-        # Initialize document ingestion
-        ingestion = DocumentIngestion()
-
-        # Process the document
-        result = ingestion.ingest_document(
-            pdf_path=file_path,
-            document_name=f"{document_id}_{original_filename}",
-            job_type=job_type,
-            section=section,
-        )
-
-        logger.info(f"Successfully processed document {document_id}: {result}")
-
-    except Exception as e:
-        logger.error(f"Error processing document {document_id}: {e}")
-
-
 # Startup and Shutdown Events
 @app.on_event("startup")
 async def startup_event():
     """Run on application startup"""
     logger.info("Cleo RAG Agent API starting up...")
     logger.info(f"Using OpenAI model: {settings.OPENAI_CHAT_MODEL}")
-    logger.info(f"Milvus host: {settings.MILVUS_HOST}:{settings.MILVUS_PORT}")
+    # logger.info(f"Milvus host: {settings.MILVUS_HOST}:{settings.MILVUS_PORT}")
 
 
 @app.on_event("shutdown")

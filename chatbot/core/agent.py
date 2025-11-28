@@ -19,7 +19,7 @@ try:
 except ImportError:
     LANGFUSE_AVAILABLE = False
 
-from chatbot.core.retrievers import KnowledgeBaseRetriever, RetrievalMethod
+# from chatbot.core.retrievers import RetrievalMethod
 from chatbot.prompts.prompts import CleoPrompts
 from chatbot.state.states import (
     ApplicationState,
@@ -43,27 +43,15 @@ class CleoRAGAgent:
     def __init__(
         self,
         session_state: SessionState = None,
-        retrieval_method: RetrievalMethod = RetrievalMethod.HYBRID,
     ):
         """
         Initialize Cleo RAG Agent
 
         Args:
             session_state: Current session state (creates new if None)
-            retrieval_method: Method for knowledge base retrieval
         """
         self.session_state = session_state or SessionState()
-        self.retrieval_method = retrieval_method
         self.state_manager = StateManager()
-
-        # Initialize retriever
-        try:
-            self.retriever = KnowledgeBaseRetriever()
-        except Exception as e:
-            logger.warning(
-                f"Could not initialize retriever: {e}. Agent will work without KB."
-            )
-            self.retriever = None
 
         # Initialize LangFuse if enabled
         self.langfuse_handler = None
@@ -115,46 +103,6 @@ class CleoRAGAgent:
     def _create_tools(self) -> List[Tool]:
         """Create tools for the agent"""
         tools = []
-
-        # Knowledge Base Query Tool
-        if self.retriever:
-
-            def query_knowledge_base(query: str) -> str:
-                """
-                Query the company's knowledge base for relevant information.
-
-                IMPORTANT: This knowledge base contains COMPANY DOCUMENTS from the hiring company, including:
-                - Company policies and procedures
-                - Job descriptions and detailed requirements
-                - Benefits, compensation, and HR policies
-                - Company culture, values, and work environment details
-                - Training materials and onboarding procedures
-                - Any other company-specific information
-
-                Use this tool whenever users have questions or ambiguities about:
-                - Job requirements, responsibilities, or expectations
-                - Company policies, procedures, or culture
-                - Benefits, salary, compensation, or work conditions
-                - Training, development, or career opportunities
-                - Any company-specific processes or information
-                """
-                try:
-                    results = self.retriever.retrieve(
-                        query=query, method=self.retrieval_method, top_k=3
-                    )
-                    context = self.retriever.format_context(results)
-                    return context
-                except Exception as e:
-                    logger.error(f"Error querying knowledge base: {e}")
-                    return "Unable to retrieve information from knowledge base."
-
-            tools.append(
-                Tool(
-                    name="query_knowledge_base",
-                    func=query_knowledge_base,
-                    description="Query the company's knowledge base containing company documents for information about jobs, requirements, benefits, policies, culture, and any company-specific details. Use this when users need clarification about company-related topics.",
-                )
-            )
 
         # Save State Tool
         def save_current_state(state_info: str) -> str:

@@ -10,7 +10,6 @@ from typing import Optional
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from chatbot.core.agent import CleoRAGAgent
-from chatbot.core.retrievers import RetrievalMethod
 from chatbot.state.states import SessionState, StateManager, ConversationStage
 from chatbot.utils.report_generator import ReportGenerator
 from chatbot.utils.config import settings, ensure_directories
@@ -29,31 +28,17 @@ class CleoApplication:
         self.state_manager = StateManager()
         self.report_generator = ReportGenerator()
     
-    def start_new_session(
-        self,
-        retrieval_method: str = "hybrid"
-    ) -> str:
+    def start_new_session(self) -> str:
         """
         Start a new conversation session
-        
-        Args:
-            retrieval_method: Retrieval method to use (semantic, similarity, hybrid)
         
         Returns:
             Session ID
         """
         logger.info("Starting new session")
         
-        # Map string to enum
-        method_map = {
-            "semantic": RetrievalMethod.SEMANTIC,
-            "similarity": RetrievalMethod.SIMILARITY,
-            "hybrid": RetrievalMethod.HYBRID
-        }
-        method = method_map.get(retrieval_method.lower(), RetrievalMethod.HYBRID)
-        
         # Create new agent
-        self.agent = CleoRAGAgent(retrieval_method=method)
+        self.agent = CleoRAGAgent()
         
         session_id = self.agent.session_state.session_id
         logger.info(f"Created new session: {session_id}")

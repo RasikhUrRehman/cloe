@@ -17,15 +17,15 @@ class Settings(BaseSettings):
     OPENAI_CHAT_MODEL: str = "gpt-4-turbo-preview"
     OPENAI_TEMPERATURE: float = 0.7
 
-    # Milvus Configuration
-    MILVUS_HOST: str = "localhost"
-    MILVUS_PORT: int = 19530
-    MILVUS_COLLECTION_NAME: str = "cleo_knowledge_base"
+    # Vector Embedding Settings (Removed - using Xano API)
+    # MILVUS_HOST: str = "localhost"
+    # MILVUS_PORT: int = 19530
+    # MILVUS_COLLECTION_NAME: str = "cleo_knowledge_base"
 
-    # Vector Embedding Settings
-    EMBEDDING_DIMENSION: int = 3072
-    CHUNK_SIZE: int = 512
-    CHUNK_OVERLAP: int = 102
+    # Vector Embedding Settings (Removed - using Xano API)
+    # EMBEDDING_DIMENSION: int = 3072
+    # CHUNK_SIZE: int = 512
+    # CHUNK_OVERLAP: int = 102
 
     # Application Settings
     APP_NAME: str = "Cleo RAG Agent"
@@ -55,10 +55,10 @@ class Settings(BaseSettings):
     REPORT_FORMAT: str = "pdf"
     INCLUDE_FIT_SCORE_IN_REPORT: bool = False
 
-    # Retrieval Configuration
-    DEFAULT_RETRIEVAL_METHOD: str = "hybrid"
-    TOP_K_RESULTS: int = 5
-    SIMILARITY_THRESHOLD: float = 0.7
+    # Retrieval Configuration (Removed - using Xano API)
+    # DEFAULT_RETRIEVAL_METHOD: str = "hybrid"
+    # TOP_K_RESULTS: int = 5
+    # SIMILARITY_THRESHOLD: float = 0.7
 
     # Verification API (Mock)
     VERIFICATION_API_ENABLED: bool = False
