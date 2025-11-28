@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 import requests
 
 from chatbot.utils.utils import setup_logging
+from chatbot.utils.xano_client import get_xano_client
 
 logger = setup_logging()
 
@@ -35,7 +36,7 @@ def get_all_jobs() -> List[Dict[str, Any]]:
 
 def get_job_by_id(job_id: str) -> Optional[Dict[str, Any]]:
     """
-    Fetch a specific job by its ID
+    Fetch a specific job by its ID using the dedicated endpoint
 
     Args:
         job_id: The unique identifier for the job
@@ -44,7 +45,15 @@ def get_job_by_id(job_id: str) -> Optional[Dict[str, Any]]:
         Job dictionary if found, None otherwise
     """
     try:
-        # Fetch all jobs
+        # Use the new Xano client to fetch job by ID directly
+        xano_client = get_xano_client()
+        job = xano_client.get_job_by_id(job_id)
+        
+        if job:
+            return job
+        
+        # Fallback: Try fetching from all jobs if direct endpoint fails
+        logger.info(f"Falling back to get_all_jobs for job_id: {job_id}")
         all_jobs = get_all_jobs()
 
         # Find the specific job

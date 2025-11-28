@@ -41,6 +41,7 @@ class EngagementState(BaseModel):
     job_details: Optional[Dict[str, Any]] = None  # Full job details from API
     language: str = "en"
     stage_completed: bool = False
+    xano_session_id: Optional[int] = None  # Xano backend session ID
 
     class Config:
         use_enum_values = True
