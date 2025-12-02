@@ -48,26 +48,25 @@
               │                              │
               ▼                              ▼
 ┌─────────────────────────────┐   ┌─────────────────────────────┐
-│   KNOWLEDGE BASE RETRIEVER   │   │     STATE MANAGER           │
-│     (retrievers.py)          │   │      (states.py)            │
+│      XANO API CLIENT         │   │   IN-MEMORY STATE           │
+│     (xano_client.py)         │   │   (states.py + agent.py)    │
 │                              │   │                             │
-│  ┌────────────────────────┐ │   │  ┌───────────────────────┐ │
-│  │  Semantic Search       │ │   │  │  CSV Storage          │ │
-│  │  (Vector Similarity)   │ │   │  │  • engagement.csv     │ │
-│  └────────────────────────┘ │   │  │  • qualification.csv  │ │
-│                              │   │  │  • application.csv    │ │
-│  ┌────────────────────────┐ │   │  │  • verification.csv   │ │
-│  │  Similarity Search     │ │   │  │  • sessions.csv       │ │
-│  │  (Threshold Filter)    │ │   │  └───────────────────────┘ │
-│  └────────────────────────┘ │   │                             │
+│  API Endpoints:              │   │  ┌───────────────────────┐ │
+│  • GET /job/{job_id}         │   │  │  LangChain Memory     │ │
+│    (Job details)             │   │  │  ConversationBuffer   │ │
+│                              │   │  │  (Chat history)       │ │
+│  • POST /aichatmessages      │   │  └───────────────────────┘ │
+│    (Sync messages)           │   │                             │
 │                              │   │  ┌───────────────────────┐ │
-│  ┌────────────────────────┐ │   │  │  Pydantic Models      │ │
-│  │  Hybrid Search         │ │   │  │  • EngagementState    │ │
-│  │  (60% Semantic +       │ │   │  │  • QualificationState │ │
-│  │   40% Keyword)         │ │   │  │  • ApplicationState   │ │
-│  └────────────────────────┘ │   │  │  • VerificationState  │ │
-│              │               │   │  └───────────────────────┘ │
-└──────────────┼───────────────┘   └─────────────────────────────┘
+│  • POST /session             │   │  │  Pydantic Models      │ │
+│    (Create session)          │   │  │  • EngagementState    │ │
+│                              │   │  │  • QualificationState │ │
+│  • PATCH /session/{id}       │   │  │  • ApplicationState   │ │
+│    (Update status)           │   │  │  • VerificationState  │ │
+│                              │   │  │  (In-memory only)     │ │
+│  Non-blocking async calls    │   │  └───────────────────────┘ │
+│  Resilient error handling    │   │                             │
+└──────────────────────────────┘   └─────────────────────────────┘
                │
                ▼
 ┌─────────────────────────────────────────────────────────────────┐
@@ -178,24 +177,29 @@
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                          DATA FLOW SUMMARY                               │
 │                                                                           │
-│  1. USER INPUT                                                           │
+│  1. USER INPUT (via API)                                                 │
 │     ↓                                                                    │
 │  2. AGENT REASONING (LangChain + GPT-4)                                  │
 │     ↓                                                                    │
-│  3. DECISION: Query KB? Save State?                                      │
+│  3. DECISION: Query Job Info? Update Status?                             │
 │     ↓                                                                    │
-│  4a. RETRIEVAL (Milvus)  OR  4b. STATE UPDATE (CSV)                     │
+│  4a. JOB FETCH (Xano)    OR  4b. STATUS UPDATE (Xano)                   │
 │     ↓                          ↓                                         │
-│  5a. CONTEXT ENRICHMENT    5b. SESSION SAVE                              │
+│  5a. CONTEXT ENRICHMENT    5b. SESSION SYNC                              │
 │     ↓                          ↓                                         │
 │  6. RESPONSE GENERATION ◀──────┘                                         │
 │     ↓                                                                    │
-│  7. USER OUTPUT                                                          │
+│  7. MESSAGE SYNC (Xano) - User & AI messages                            │
+│     ↓                                                                    │
+│  8. USER OUTPUT                                                          │
+│                                                                           │
+│  On Stage Transitions:                                                   │
+│  9. UPDATE XANO STATUS (Started/Continue/Pending/Completed)              │
 │                                                                           │
 │  At Completion:                                                          │
-│  8. FIT SCORE CALCULATION                                                │
-│  9. REPORT GENERATION (JSON + PDF)                                       │
-│  10. EMPLOYER DASHBOARD (Future)                                         │
+│  10. FIT SCORE CALCULATION                                               │
+│  11. REPORT GENERATION (JSON)                                            │
+│  12. XANO STATUS: Completed                                              │
 └─────────────────────────────────────────────────────────────────────────┘
 
 
@@ -242,15 +246,16 @@
 │                         TECHNOLOGY STACK                                 │
 │                                                                           │
 │  Frontend (Future):  React, Tailwind CSS                                 │
-│  Backend:            Python 3.11+, FastAPI (Future)                      │
-│  Agent:              LangChain 0.1.20                                    │
+│  Backend:            Python 3.11+, FastAPI                               │
+│  Agent:              LangChain 0.1.x                                     │
 │  LLM:                OpenAI GPT-4 Turbo Preview                          │
 │  Embeddings:         OpenAI text-embedding-3-large (3072-dim)            │
 │  Vector DB:          Milvus 2.3.3                                        │
 │  Storage:            etcd 3.5.5, MinIO RELEASE.2023-03-20                │
-│  Persistence:        CSV (dev), PostgreSQL (prod)                        │
+│  Persistence:        Xano Cloud Backend                                  │
+│  Memory:             LangChain ConversationBufferMemory (in-memory)      │
 │  PDF Processing:     PyMuPDF 1.23.26                                     │
-│  Report Gen:         ReportLab 4.0.9                                     │
+│  Report Gen:         JSON-based (PDF generation optional)                │
 │  Validation:         Pydantic 2.6.1                                      │
 │  Logging:            Loguru 0.7.2                                        │
 │  Deployment:         Docker, Docker Compose                              │

@@ -12,10 +12,8 @@ services:
       - OPENAI_EMBEDDING_MODEL=text-embedding-3-large
       - OPENAI_TEMPERATURE=0.7
     volumes:
-      - ./data:/app/data
       - ./uploads:/app/uploads
       - ./reports:/app/reports
-      - ./applications:/app/applications
       - ./logs:/app/logs
     networks:
       - cleo_network
