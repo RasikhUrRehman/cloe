@@ -59,14 +59,6 @@ htmlcov/
 .ipynb_checkpoints
 *.ipynb
 
-# Data Files (except examples)
-data/raw/*
-!data/raw/.gitkeep
-data/processed/*
-!data/processed/.gitkeep
-*.csv
-!example_*.csv
-
 # Vector Store Data
 milvus_data/
 etcd_data/

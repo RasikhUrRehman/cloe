@@ -96,12 +96,8 @@ settings = Settings()
 def ensure_directories():
     """Create necessary directories if they don't exist"""
     directories = [
-        settings.DATA_DIR,
-        os.path.join(settings.DATA_DIR, "raw"),
-        os.path.join(settings.DATA_DIR, "processed"),
         settings.UPLOADS_DIR,
         settings.REPORTS_DIR,
-        settings.CSV_STORAGE_DIR,
         "logs",
     ]
 
