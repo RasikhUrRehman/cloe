@@ -60,18 +60,19 @@ htmlcov/
 *.ipynb
 
 # Data Files (except examples)
-data/raw/*
-!data/raw/.gitkeep
-data/processed/*
-!data/processed/.gitkeep
-*.csv
 !example_*.csv
+data/
+reports/
+applications/
 
-# Vector Store Data
-milvus_data/
-etcd_data/
-minio_data/
-volumes/
+# Test files
+test_xano_integration.py
+
+# Vector Store Data (removed)
+# milvus_data/
+# etcd_data/
+# minio_data/
+# volumes/
 
 # Generated Reports
 reports/*.pdf

@@ -57,30 +57,9 @@ def test_openai_api_key() -> Tuple[bool, str]:
         return False, f"Error loading config: {str(e)}"
 
 
-def test_milvus_connection() -> Tuple[bool, str]:
-    """Test Milvus connection"""
-    try:
-        from pymilvus import connections, utility
-        from chatbot.utils.config import settings
-        
-        connections.connect(
-            alias="test",
-            host=settings.MILVUS_HOST,
-            port=settings.MILVUS_PORT
-        )
-        
-        # Test if we can list collections
-        collections = utility.list_collections()
-        connections.disconnect("test")
-        
-        return True, f"Milvus connected ({len(collections)} collections)"
-    except Exception as e:
-        return False, f"Milvus connection failed: {str(e)}"
-
-
 def test_directories() -> Tuple[bool, str]:
     """Test if required directories exist"""
-    required_dirs = ['data', 'data/raw', 'storage', 'reports', 'uploads', 'logs']
+    required_dirs = ['storage', 'reports', 'uploads', 'logs']
     missing = [d for d in required_dirs if not os.path.exists(d)]
     
     if not missing:
@@ -106,39 +85,7 @@ def test_docker_compose() -> Tuple[bool, str]:
     """Test if docker-compose.yml exists"""
     if os.path.exists('docker-compose.yml'):
         return True, "docker-compose.yml found"
-    return False, "docker-compose.yml not found"
-
-
-def test_sample_docs() -> Tuple[bool, str]:
-    """Test if sample documents exist"""
-    if os.path.exists('data/raw'):
-        pdf_files = [f for f in os.listdir('data/raw') if f.endswith('.pdf')]
-        if pdf_files:
-            return True, f"Found {len(pdf_files)} PDF file(s)"
-        return False, "No PDF files in data/raw (run create_sample_docs.py)"
-    return False, "data/raw directory not found"
-
-
-def test_knowledge_base() -> Tuple[bool, str]:
-    """Test if knowledge base collection exists"""
-    try:
-        from pymilvus import connections, utility
-        from chatbot.utils.config import settings
-        
-        connections.connect(
-            alias="test",
-            host=settings.MILVUS_HOST,
-            port=settings.MILVUS_PORT
-        )
-        
-        has_collection = utility.has_collection(settings.MILVUS_COLLECTION_NAME)
-        connections.disconnect("test")
-        
-        if has_collection:
-            return True, f"Collection '{settings.MILVUS_COLLECTION_NAME}' exists"
-        return False, f"Collection '{settings.MILVUS_COLLECTION_NAME}' not found (run setup_knowledge_base.py)"
-    except Exception as e:
-        return False, f"Cannot check collection: {str(e)}"
+    return False, f"Missing directories: {', '.join(missing)}"
 
 
 def run_all_tests():
@@ -161,7 +108,7 @@ def run_all_tests():
         ("loguru", "loguru"),
         ("langchain", "langchain"),
         ("langchain_openai", "langchain-openai"),
-        ("pymilvus", "pymilvus"),
+        # ("pymilvus", "pymilvus"),
         ("fitz", "PyMuPDF"),
         ("openai", "openai"),
         ("reportlab", "reportlab"),
@@ -169,9 +116,8 @@ def run_all_tests():
     
     # Optional tests (may fail if services not running)
     optional_tests = [
-        ("Milvus Connection", test_milvus_connection),
-        ("Sample Documents", test_sample_docs),
-        ("Knowledge Base", test_knowledge_base),
+        # ("Milvus Connection", test_milvus_connection),
+        # ("Knowledge Base", test_knowledge_base),
     ]
     
     results = []

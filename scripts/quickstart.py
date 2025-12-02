@@ -152,11 +152,11 @@ def install_dependencies():
     )
 
 
-def start_milvus():
-    """Start Milvus stack"""
-    print_step(5, 7, "Starting Milvus Stack")
+def start_api():
+    """Start API service"""
+    print_step(5, 6, "Starting API Service")
     
-    print("  Starting Milvus, etcd, and MinIO...")
+    print("  Starting Cleo API...")
     return run_command(
         'docker-compose up -d',
         'Starting Docker containers'
@@ -165,7 +165,7 @@ def start_milvus():
 
 def create_sample_documents():
     """Create sample documents"""
-    print_step(6, 7, "Creating Sample Documents")
+    print_step(6, 6, "Creating Sample Documents")
     
     # Determine python command
     if sys.platform == 'win32':
@@ -176,25 +176,6 @@ def create_sample_documents():
     return run_command(
         f'{python_cmd} create_sample_docs.py',
         'Creating sample company documents'
-    )
-
-
-def setup_knowledge_base():
-    """Setup knowledge base"""
-    print_step(7, 7, "Setting Up Knowledge Base")
-    
-    # Determine python command
-    if sys.platform == 'win32':
-        python_cmd = '.\\venv\\Scripts\\python.exe'
-    else:
-        python_cmd = './venv/bin/python'
-    
-    print("  This will ingest sample documents into Milvus...")
-    print("  (This may take a minute)")
-    
-    return run_command(
-        f'{python_cmd} setup_knowledge_base.py',
-        'Ingesting documents into knowledge base'
     )
 
 
@@ -222,7 +203,6 @@ def show_next_steps():
     
     print("\n" + "="*70)
     print("\nUseful Commands:")
-    print(f"  • Test retrievers:  {python_cmd} retrievers.py")
     print(f"  • Test fit score:   {python_cmd} fit_score.py")
     print(f"  • Generate report:  {python_cmd} report_generator.py")
     print(f"  • Mock verification: {python_cmd} verification.py")
@@ -248,9 +228,8 @@ def main():
     print("  2. Set up environment variables")
     print("  3. Create virtual environment")
     print("  4. Install dependencies")
-    print("  5. Start Milvus stack")
+    print("  5. Start API service")
     print("  6. Create sample documents")
-    print("  7. Setup knowledge base")
     
     response = input("\nContinue? (yes/no): ").strip().lower()
     if response != 'yes':
@@ -263,9 +242,8 @@ def main():
         setup_environment,
         create_virtual_environment,
         install_dependencies,
-        start_milvus,
+        start_api,
         create_sample_documents,
-        setup_knowledge_base,
     ]
     
     for step in steps:
