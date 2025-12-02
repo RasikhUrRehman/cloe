@@ -454,9 +454,6 @@ async function handleStartConversation() {
         // Create Xano session (optional, backend will also create one)
         // We create it here to get the ID early for frontend tracking
         xanoSessionId = await createXanoSession();
-        if (xanoSessionId) {
-            console.log('Created Xano session:', xanoSessionId);
-        }
         
         // Create session (with job_id if selected)
         const sessionData = await createSession();
