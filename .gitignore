@@ -59,11 +59,20 @@ htmlcov/
 .ipynb_checkpoints
 *.ipynb
 
-# Vector Store Data
-milvus_data/
-etcd_data/
-minio_data/
-volumes/
+# Data Files (except examples)
+!example_*.csv
+data/
+reports/
+applications/
+
+# Test files
+test_xano_integration.py
+
+# Vector Store Data (removed)
+# milvus_data/
+# etcd_data/
+# minio_data/
+# volumes/
 
 # Generated Reports
 reports/*.pdf
