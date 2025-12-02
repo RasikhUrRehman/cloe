@@ -78,7 +78,6 @@ def ensure_directories():
         os.path.join(settings.DATA_DIR, "processed"),
         settings.UPLOADS_DIR,
         settings.REPORTS_DIR,
-        settings.CSV_STORAGE_DIR,
         "logs",
     ]
     for directory in directories:

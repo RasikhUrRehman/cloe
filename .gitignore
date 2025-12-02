@@ -60,8 +60,13 @@ htmlcov/
 *.ipynb
 
 # Data Files (except examples)
-*.csv
 !example_*.csv
+data/
+reports/
+applications/
+
+# Test files
+test_xano_integration.py
 
 # Vector Store Data (removed)
 # milvus_data/

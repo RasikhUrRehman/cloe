@@ -15,7 +15,7 @@ services:
       - ./data:/app/data
       - ./uploads:/app/uploads
       - ./reports:/app/reports
-      - ./storage:/app/storage
+      - ./applications:/app/applications
       - ./logs:/app/logs
     networks:
       - cleo_network

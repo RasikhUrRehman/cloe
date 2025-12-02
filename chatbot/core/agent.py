@@ -22,12 +22,12 @@ from chatbot.state.states import (
     EngagementState,
     QualificationState,
     SessionState,
-    StateManager,
     VerificationState,
 )
 from chatbot.utils.config import settings
 from chatbot.utils.job_fetcher import format_job_details
 from chatbot.utils.utils import get_current_timestamp, setup_logging
+from chatbot.utils.xano_client import get_xano_client
 logger = setup_logging()
 class CleoRAGAgent:
     """Agentic RAG system for conversational job application"""
@@ -41,7 +41,20 @@ class CleoRAGAgent:
             session_state: Current session state (creates new if None)
         """
         self.session_state = session_state or SessionState()
-        self.state_manager = StateManager()
+        self.xano_client = get_xano_client()
+        
+        # Create Xano session and store session ID
+        if not self.session_state.engagement:
+            self.session_state.engagement = EngagementState(session_id=self.session_state.session_id)
+        
+        if not self.session_state.engagement.xano_session_id:
+            xano_session = self.xano_client.create_session(initial_status="Started")
+            if xano_session:
+                self.session_state.engagement.xano_session_id = xano_session.get('id')
+                logger.info(f"Created Xano session {self.session_state.engagement.xano_session_id} for session {self.session_state.session_id}")
+            else:
+                logger.warning(f"Failed to create Xano session for {self.session_state.session_id}")
+        
         # Initialize LangFuse if enabled
         self.langfuse_handler = None
         self.langfuse_enabled = settings.LANGFUSE_ENABLED
@@ -87,12 +100,8 @@ class CleoRAGAgent:
         # Save State Tool
         def save_current_state(_: str) -> str:
             """Save the current conversation state"""
-            try:
-                self.state_manager.save_session(self.session_state)
-                return f"State saved successfully for session {self.session_state.session_id}"
-            except Exception as e:
-                logger.error(f"Error saving state: {e}")
-                return f"Error saving state: {str(e)}"
+            # State is managed via Xano and LangChain memory
+            return f"State tracked in memory for session {self.session_state.session_id}"
         tools.append(
             Tool(
                 name="save_state",
@@ -151,6 +160,31 @@ class CleoRAGAgent:
         """Refresh the agent with updated job context"""
         self.agent = self._create_agent()
         logger.info("Agent refreshed with job context")
+    
+    def _update_xano_status(self, stage: ConversationStage):
+        """Update Xano session status based on conversation stage"""
+        if not self.session_state.engagement or not self.session_state.engagement.xano_session_id:
+            logger.warning("Cannot update Xano status: No Xano session ID found")
+            return
+        
+        xano_session_id = self.session_state.engagement.xano_session_id
+        
+        # Map conversation stages to Xano status values
+        stage_to_status = {
+            ConversationStage.ENGAGEMENT: "Started",
+            ConversationStage.QUALIFICATION: "Continue",
+            ConversationStage.APPLICATION: "Continue",
+            ConversationStage.VERIFICATION: "Pending",
+            ConversationStage.COMPLETED: "Completed",
+        }
+        
+        status = stage_to_status.get(stage, "Continue")
+        
+        result = self.xano_client.patch_session_status(xano_session_id, status)
+        if result:
+            logger.info(f"Updated Xano session {xano_session_id} to status: {status}")
+        else:
+            logger.warning(f"Failed to update Xano session {xano_session_id} status")
     def process_message(self, user_message: str) -> List[str]:
         """
         Process user message and generate response(s) with retry logic
@@ -201,9 +235,6 @@ class CleoRAGAgent:
                     messages = self._split_multi_messages(agent_response)
                     # Update conversation state based on response
                     self._update_state_from_conversation(user_message, agent_response)
-                    # Always save session state after processing to ensure persistence
-                    self.state_manager.save_session(self.session_state)
-                    logger.info(f"Session state saved after message processing")
                     logger.info(f"Successfully processed message on attempt {attempt + 1}")
                     return messages
                 else:
@@ -284,7 +315,7 @@ class CleoRAGAgent:
             self.session_state.engagement.consent_given = True
             self.session_state.engagement.stage_completed = True
             self.session_state.current_stage = ConversationStage.QUALIFICATION
-            self.state_manager.save_session(self.session_state)
+            self._update_xano_status(ConversationStage.QUALIFICATION)
             logger.info("Quick transition to QUALIFICATION based on consent")
     def _enhance_input_with_context(self, user_message: str) -> str:
         """
@@ -478,6 +509,7 @@ class CleoRAGAgent:
                     self.session_state.engagement.consent_given = True
                     self.session_state.engagement.stage_completed = True
                     self.session_state.current_stage = ConversationStage.QUALIFICATION
+                    self._update_xano_status(ConversationStage.QUALIFICATION)
                     state_changed = True
                     logger.info("Moving to QUALIFICATION stage")
         # Qualification stage updates
@@ -586,6 +618,7 @@ class CleoRAGAgent:
                     qual.qualification_status = "qualified"
                     qual.stage_completed = True
                     self.session_state.current_stage = ConversationStage.APPLICATION
+                    self._update_xano_status(ConversationStage.APPLICATION)
                     state_changed = True
                     logger.info("Qualification completed - Moving to APPLICATION stage")
         # Application stage updates
@@ -607,6 +640,7 @@ class CleoRAGAgent:
                     self._calculate_and_save_fit_score()
                     # Transition to verification/completed stage
                     self.session_state.current_stage = ConversationStage.COMPLETED
+                    self._update_xano_status(ConversationStage.COMPLETED)
                     state_changed = True
                     logger.info(
                         "Application completed - Fit score calculated - Moving to COMPLETED stage"
@@ -619,11 +653,10 @@ class CleoRAGAgent:
                 )
             # Handle verification completion
             # This would be triggered by actual verification processes
-        # Save state if changes were made
+        # Log state changes
         if state_changed:
-            self.state_manager.save_session(self.session_state)
             logger.info(
-                f"State updated and saved for session {self.session_state.session_id}"
+                f"State updated for session {self.session_state.session_id}"
             )
     def _is_qualification_complete(self, qual: QualificationState) -> bool:
         """Check if qualification stage is complete"""
@@ -858,10 +891,9 @@ class CleoRAGAgent:
                         state_changed = True
                         logger.info(f"Proactively captured experience: {years} years")
                         break
-        # Save state if any changes were made
+        # Log state changes
         if state_changed:
-            self.state_manager.save_session(self.session_state)
-            logger.info("Proactive information extraction completed - state saved")
+            logger.info("Proactive information extraction completed")
         return state_changed
     def _calculate_and_save_fit_score(self):
         """Calculate fit score when application is complete"""

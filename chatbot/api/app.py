@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from chatbot.core.agent import CleoRAGAgent
-from chatbot.state.states import SessionState, StateManager
+from chatbot.state.states import SessionState
 from chatbot.utils.config import ensure_directories, settings
 from chatbot.utils.job_fetcher import get_job_by_id
 from chatbot.utils.utils import get_current_timestamp, setup_logging
@@ -171,46 +171,9 @@ def get_or_create_agent(session_id: str) -> CleoRAGAgent:
         CleoRAGAgent instance
     """
     if session_id not in active_sessions:
-        # Try to load existing session from storage
-        state_manager = StateManager()
-        engagement = state_manager.load_engagement(session_id)
-        if engagement:
-            # Reconstruct session state
-            session_state = SessionState(session_id=session_id)
-            session_state.engagement = engagement
-            session_state.qualification = state_manager.load_qualification(session_id)
-            session_state.application = state_manager.load_application(session_id)
-            session_state.verification = state_manager.load_verification(session_id)
-            # Determine current stage
-            if (
-                session_state.verification
-                and session_state.verification.stage_completed
-            ):
-                from chatbot.state.states import ConversationStage
-                session_state.current_stage = ConversationStage.COMPLETED
-            elif (
-                session_state.application
-                and not session_state.application.stage_completed
-            ):
-                from chatbot.state.states import ConversationStage
-                session_state.current_stage = ConversationStage.APPLICATION
-            elif (
-                session_state.qualification
-                and not session_state.qualification.stage_completed
-            ):
-                from chatbot.state.states import ConversationStage
-                session_state.current_stage = ConversationStage.QUALIFICATION
-            elif (
-                session_state.engagement
-                and not session_state.engagement.stage_completed
-            ):
-                from chatbot.state.states import ConversationStage
-                session_state.current_stage = ConversationStage.ENGAGEMENT
-            agent = CleoRAGAgent(session_state=session_state)
-        else:
-            # Create new agent with specified session_id
-            session_state = SessionState(session_id=session_id)
-            agent = CleoRAGAgent(session_state=session_state)
+        # Create new agent - state is managed in-memory via LangChain and Xano
+        session_state = SessionState(session_id=session_id)
+        agent = CleoRAGAgent(session_state=session_state)
         active_sessions[session_id] = agent
     return active_sessions[session_id]
 # API Endpoints
@@ -631,43 +594,10 @@ async def get_application(session_id: str):
         # Check if application JSON file exists
         application_file = os.path.join("./applications", f"application_{normalized_session_id}.json")
         if not os.path.exists(application_file):
-            # Try to get from state manager as fallback
-            state_manager = StateManager()
-            # Load individual states
-            engagement = state_manager.load_engagement(normalized_session_id)
-            qualification = state_manager.load_qualification(normalized_session_id)
-            application = state_manager.load_application(normalized_session_id)
-            verification = state_manager.load_verification(normalized_session_id)
-            # Check if application exists
-            if not application:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"No application found for session {normalized_session_id}"
-                )
-            # Check if application is complete
-            if not application.stage_completed:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Application for session {normalized_session_id} is not yet complete"
-                )
-            # Build application data from state
-            application_data = {
-                "session_id": normalized_session_id,
-                "timestamp": get_current_timestamp(),
-                "job": engagement.job_details if engagement else None,
-                "applicant": {
-                    "name": application.full_name,
-                    "phone": application.phone_number,
-                    "email": application.email,
-                    "address": application.address,
-                } if application else None,
-                "qualification": qualification.model_dump() if qualification else None,
-                "application": application.model_dump() if application else None,
-                "verification": verification.model_dump() if verification else None,
-                "fit_score": None,  # Fit score is only available in JSON file
-                "status": "completed" if application.stage_completed else "in_progress",
-            }
-            return application_data
+            raise HTTPException(
+                status_code=404,
+                detail=f"No application found for session {normalized_session_id}"
+            )
         # Load application from JSON file
         with open(application_file, 'r') as f:
             application_data = json.load(f)

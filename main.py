@@ -10,7 +10,7 @@ from typing import Optional
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from chatbot.core.agent import CleoRAGAgent
-from chatbot.state.states import SessionState, StateManager, ConversationStage
+from chatbot.state.states import SessionState, ConversationStage
 from chatbot.utils.report_generator import ReportGenerator
 from chatbot.utils.config import ensure_directories
 from chatbot.utils.utils import setup_logging
@@ -25,7 +25,6 @@ class CleoApplication:
         """Initialize the Cleo application"""
         ensure_directories()
         self.agent: Optional[CleoRAGAgent] = None
-        self.state_manager = StateManager()
         self.report_generator = ReportGenerator()
 
     def start_new_session(self) -> str:
@@ -47,48 +46,16 @@ class CleoApplication:
 
     def resume_session(self, session_id: str) -> bool:
         """
-        Resume an existing conversation session
+        Resume an existing conversation session - Not supported with in-memory storage
 
         Args:
             session_id: Session ID to resume
 
         Returns:
-            True if session was found and resumed, False otherwise
+            False - session resumption not supported
         """
-        logger.info(f"Attempting to resume session: {session_id}")
-
-        # Load session data
-        engagement = self.state_manager.load_engagement(session_id)
-        qualification = self.state_manager.load_qualification(session_id)
-        application = self.state_manager.load_application(session_id)
-        verification = self.state_manager.load_verification(session_id)
-
-        if not engagement:
-            logger.warning(f"Session {session_id} not found")
-            return False
-
-        # Reconstruct session state
-        session_state = SessionState(session_id=session_id)
-        session_state.engagement = engagement
-        session_state.qualification = qualification
-        session_state.application = application
-        session_state.verification = verification
-
-        # Determine current stage
-        if verification and verification.stage_completed:
-            session_state.current_stage = ConversationStage.COMPLETED
-        elif application and not application.stage_completed:
-            session_state.current_stage = ConversationStage.APPLICATION
-        elif qualification and not qualification.stage_completed:
-            session_state.current_stage = ConversationStage.QUALIFICATION
-        elif engagement and not engagement.stage_completed:
-            session_state.current_stage = ConversationStage.ENGAGEMENT
-
-        # Create agent with loaded state
-        self.agent = CleoRAGAgent(session_state=session_state)
-
-        logger.info(f"Resumed session {session_id} at stage {session_state.current_stage}")
-        return True
+        logger.warning(f"Session resumption not supported: {session_id}")
+        return False
 
     def chat(self, message: str) -> str:
         """
