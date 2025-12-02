@@ -1,7 +1,6 @@
 """
 State management modules
 """
-
 from chatbot.state.states import (
     ApplicationState,
     ConversationStage,
@@ -11,7 +10,6 @@ from chatbot.state.states import (
     StateManager,
     VerificationState,
 )
-
 __all__ = [
     "SessionState",
     "EngagementState",

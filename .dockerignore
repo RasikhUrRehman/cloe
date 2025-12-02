@@ -42,11 +42,11 @@ htmlcov/
 logs/
 
 # Data (don't copy large datasets to image)
-data/raw/*
-milvus_data/
-etcd_data/
-minio_data/
-volumes/
+# data/raw/*
+# milvus_data/
+# etcd_data/
+# minio_data/
+# volumes/
 
 # Temporary Files
 tmp/

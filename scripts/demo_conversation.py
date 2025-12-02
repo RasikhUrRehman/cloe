@@ -172,50 +172,6 @@ def simulate_conversation():
     print("All data has been saved to CSV files in the storage directory.")
 
 
-def demo_retrieval():
-    """Demo the retrieval methods (requires knowledge base to be populated)"""
-    print_separator("Knowledge Base Retrieval Demo")
-    
-    try:
-        from chatbot.core.retrievers import KnowledgeBaseRetriever, RetrievalMethod
-        
-        retriever = KnowledgeBaseRetriever()
-        
-        queries = [
-            "What are the shift requirements?",
-            "What benefits are available?",
-            "What skills are needed for warehouse positions?",
-        ]
-        
-        for query in queries:
-            print(f"\nQuery: {query}")
-            print("-" * 60)
-            
-            results = retriever.retrieve(
-                query=query,
-                method=RetrievalMethod.HYBRID,
-                top_k=2
-            )
-            
-            if results:
-                for i, result in enumerate(results, 1):
-                    print(f"\nResult {i}:")
-                    print(f"  Document: {result['document_name']}")
-                    print(f"  Section: {result['section']}")
-                    print(f"  Score: {result.get('score', 0):.3f}")
-                    print(f"  Text: {result['text'][:150]}...")
-            else:
-                print("  No results found (knowledge base may be empty)")
-        
-        print_separator()
-        
-    except Exception as e:
-        logger.warning(f"Retrieval demo skipped: {e}")
-        print(f"Retrieval demo skipped (Milvus may not be running): {e}")
-        print("To use retrieval features, make sure Milvus is running:")
-        print("  docker-compose up -d")
-
-
 def main():
     """Run all demos"""
     print("\n" + "=" * 60)
@@ -224,13 +180,6 @@ def main():
     
     # Demo 1: Complete conversation flow
     simulate_conversation()
-    
-    # Demo 2: Retrieval methods (optional)
-    print("\n\nWould you like to demo the knowledge base retrieval? (Requires Milvus)")
-    response = input("Enter 'yes' to continue: ").strip().lower()
-    
-    if response == 'yes':
-        demo_retrieval()
     
     print("\n" + "=" * 60)
     print("Thank you for exploring Cleo RAG Agent!")
