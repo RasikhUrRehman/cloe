@@ -230,20 +230,12 @@ def main():
             else:
                 print(f"Could not find session: {session_id}")
 
-        elif command == 'api':
-            print("Starting FastAPI server...")
-            print("Use 'python run_api.py' instead for API mode")
-            import uvicorn
-            from chatbot.api.app import app as fastapi_app
-            uvicorn.run(fastapi_app, host="0.0.0.0", port=8000)
-
         else:
             print("Usage:")
             print("  python main.py              - Run interactive mode")
             print("  python main.py new          - Start new session")
             print("  python main.py resume <id>  - Resume session")
-            print("  python main.py api          - Run API server")
-            print("\nFor API mode, you can also run: python run_api.py")
+            print("\nFor API mode, run: python run_api.py")
     else:
         # Run interactive mode
         app.run_interactive()

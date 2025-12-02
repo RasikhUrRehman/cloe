@@ -757,7 +757,4 @@ async def shutdown_event():
             logger.info(f"Saved session: {session_id}")
         except Exception as e:
             logger.error(f"Error saving session {session_id}: {e}")
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True, log_level="info")
 
