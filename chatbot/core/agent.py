@@ -14,7 +14,7 @@ try:
 except ImportError:
     LANGFUSE_AVAILABLE = False
 # from chatbot.core.retrievers import RetrievalMethod
-from chatbot.core.tools import get_all_tools, set_tool_context
+from chatbot.core.tools import create_agent_tools, AgentToolkit
 from chatbot.prompts.prompts import CleoPrompts
 from chatbot.state.states import (
     ApplicationState,
@@ -46,8 +46,8 @@ class CleoRAGAgent:
         self.job_id = job_id  # Store job_id for candidate creation
         self.xano_client = get_xano_client()
         
-        # Set tool context so tools can access session state and job_id
-        set_tool_context(self.session_state, self.job_id)
+        # Create toolkit for this agent (bound to session state, no globals)
+        self.toolkit = AgentToolkit(self.session_state, self.job_id)
         
         # Create Xano session and store session ID
         if not self.session_state.engagement:
@@ -106,8 +106,8 @@ class CleoRAGAgent:
             )
             logger.info(f"Added job_id {self.job_id} to agent memory")
         
-        # Get tools from the tools module
-        self.tools = get_all_tools()
+        # Get tools from the toolkit (bound to this agent's session state)
+        self.tools = self.toolkit.get_tools()
         self.agent = self._create_agent()
 
     def _create_agent(self) -> AgentExecutor:
@@ -185,6 +185,81 @@ class CleoRAGAgent:
             logger.info(f"Updated Xano session {xano_session_id} to status: {status}")
         else:
             logger.warning(f"Failed to update Xano session {xano_session_id} status")
+    
+    def sync_session_state_to_xano(self):
+        """
+        Synchronize the current session state to Xano.
+        This ensures Xano always has the most up-to-date status.
+        Call this after any state changes to keep Xano in sync.
+        """
+        if not self.session_state.engagement or not self.session_state.engagement.xano_session_id:
+            logger.warning("Cannot sync to Xano: No Xano session ID found")
+            return False
+        
+        xano_session_id = self.session_state.engagement.xano_session_id
+        current_stage = self.session_state.current_stage
+        
+        # Map conversation stages to Xano status values
+        stage_to_status = {
+            ConversationStage.ENGAGEMENT: "Started",
+            ConversationStage.QUALIFICATION: "Continue",
+            ConversationStage.APPLICATION: "Continue",
+            ConversationStage.VERIFICATION: "Pending",
+            ConversationStage.COMPLETED: "Completed",
+        }
+        
+        status = stage_to_status.get(current_stage, "Continue")
+        
+        # Prepare update data with both status and stage information
+        update_data = {
+            "Status": status,
+            "conversation_stage": current_stage.value,  # Store the actual stage name
+        }
+        
+        # Add candidate_id if available
+        if self.session_state.engagement.candidate_id:
+            update_data["candidate_id"] = self.session_state.engagement.candidate_id
+        
+        result = self.xano_client.update_session(xano_session_id, update_data)
+        if result:
+            logger.info(f"Synced session state to Xano: session={xano_session_id}, status={status}, stage={current_stage.value}")
+            return True
+        else:
+            logger.warning(f"Failed to sync session state to Xano for session {xano_session_id}")
+            return False
+    
+    def get_xano_session_status(self) -> dict:
+        """
+        Get the current session status from Xano.
+        Returns a dict with status, stage, and other session info.
+        """
+        if not self.session_state.engagement or not self.session_state.engagement.xano_session_id:
+            return {
+                "status": "Unknown",
+                "conversation_stage": self.session_state.current_stage.value,
+                "synced": False,
+                "error": "No Xano session ID"
+            }
+        
+        xano_session_id = self.session_state.engagement.xano_session_id
+        xano_session = self.xano_client.get_session_by_id(xano_session_id)
+        
+        if xano_session:
+            return {
+                "xano_session_id": xano_session_id,
+                "status": xano_session.get("Status", "Unknown"),
+                "conversation_stage": xano_session.get("conversation_stage", self.session_state.current_stage.value),
+                "candidate_id": xano_session.get("candidate_id"),
+                "synced": True,
+                "local_stage": self.session_state.current_stage.value,
+            }
+        else:
+            return {
+                "status": "Unknown",
+                "conversation_stage": self.session_state.current_stage.value,
+                "synced": False,
+                "error": "Failed to fetch from Xano"
+            }
     def process_message(self, user_message: str) -> List[str]:
         """
         Process user message and generate response(s) with retry logic
@@ -316,6 +391,8 @@ class CleoRAGAgent:
             self.session_state.engagement.stage_completed = True
             self.session_state.current_stage = ConversationStage.QUALIFICATION
             self._update_xano_status(ConversationStage.QUALIFICATION)
+            # Sync the full state to Xano for real-time alignment
+            self.sync_session_state_to_xano()
             logger.info("Quick transition to QUALIFICATION based on consent")
     def _enhance_input_with_context(self, user_message: str) -> str:
         """
@@ -653,11 +730,13 @@ class CleoRAGAgent:
                 )
             # Handle verification completion
             # This would be triggered by actual verification processes
-        # Log state changes
+        # Log state changes and sync to Xano
         if state_changed:
             logger.info(
                 f"State updated for session {self.session_state.session_id}"
             )
+            # Sync the updated state to Xano to keep it in real-time alignment
+            self.sync_session_state_to_xano()
     def _is_qualification_complete(self, qual: QualificationState) -> bool:
         """Check if qualification stage is complete"""
         return all(
@@ -831,9 +910,8 @@ class CleoRAGAgent:
                 app.email = email_match.group()
                 state_changed = True
                 logger.info("Proactively captured email")
-                # Update candidate with email in Xano using tool
-                from chatbot.core.tools import update_candidate
-                update_candidate.invoke(f"email: {app.email}")
+                # Update candidate with email in Xano using toolkit method
+                self.toolkit.update_candidate(f"email: {app.email}")
         # Phone pattern
         phone_pattern = (
             r"(\+?1?[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})"
@@ -844,9 +922,8 @@ class CleoRAGAgent:
                 app.phone_number = phone_match.group()
                 state_changed = True
                 logger.info("Proactively captured phone number")
-                # Update candidate with phone in Xano using tool
-                from chatbot.core.tools import update_candidate
-                update_candidate.invoke(f"phone: {app.phone_number}")
+                # Update candidate with phone in Xano using toolkit method
+                self.toolkit.update_candidate(f"phone: {app.phone_number}")
         # Name pattern
         name_patterns = [
             r"my name is ([A-Za-z\s]+)",
@@ -880,9 +957,8 @@ class CleoRAGAgent:
                         app.full_name = name
                         state_changed = True
                         logger.info(f"Proactively captured name: {name}")
-                        # Auto-create candidate in Xano when name is captured using tool
-                        from chatbot.core.tools import create_candidate
-                        create_candidate.invoke(name)
+                        # Auto-create candidate in Xano when name is captured using toolkit method
+                        self.toolkit.create_candidate(name)
                         break
         # Years of experience
         exp_patterns = [

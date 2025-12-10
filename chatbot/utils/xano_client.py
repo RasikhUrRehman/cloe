@@ -9,25 +9,73 @@ from chatbot.utils.utils import setup_logging
 logger = setup_logging()
 
 # Xano API Base URLs
+XANO_AUTH_API_URL = "https://xoho-w3ng-km3o.n7e.xano.io/api:LNn6-rP8"
 XANO_JOB_API_URL = "https://xoho-w3ng-km3o.n7e.xano.io/api:L-QNLSmb"
 XANO_CHAT_API_URL = "https://xoho-w3ng-km3o.n7e.xano.io/api:wnnakKFu"
 XANO_SESSION_API_URL = "https://xoho-w3ng-km3o.n7e.xano.io/api:mYiFh-E2"
 XANO_CANDIDATE_API_URL = "https://xoho-w3ng-km3o.n7e.xano.io/api:6skoiMBa"
 XANO_COMPANY_API_URL = "https://xoho-w3ng-km30.n7e.xano.io/api:JpRLUNqy"
 
+# Default credentials
+DEFAULT_EMAIL = "user@example.com"
+DEFAULT_PASSWORD = "string123"
+
 
 class XanoClient:
     """Client for interacting with Xano APIs"""
 
-    def __init__(self, timeout: int = 10):
+    def __init__(self, timeout: int = 10, email: str = DEFAULT_EMAIL, password: str = DEFAULT_PASSWORD):
         """
-        Initialize Xano API client
+        Initialize Xano API client and authenticate
         
         Args:
             timeout: Request timeout in seconds
+            email: Email for authentication
+            password: Password for authentication
         """
         self.timeout = timeout
         self.session = requests.Session()
+        self.auth_token = None
+        self.headers = {"Content-Type": "application/json"}
+        
+        # Login to get auth token
+        self._login(email, password)
+
+    def _login(self, email: str, password: str) -> bool:
+        """
+        Login to Xano and store the auth token
+        
+        Args:
+            email: User email
+            password: User password
+            
+        Returns:
+            True if login successful, False otherwise
+        """
+        try:
+            url = f"{XANO_AUTH_API_URL}/auth/login"
+            payload = {"email": email, "password": password}
+            logger.info(f"Logging in to Xano with email: {email}")
+            response = self.session.post(url, json=payload, timeout=self.timeout)
+            response.raise_for_status()
+            result = response.json()
+            self.auth_token = result.get("authToken")
+            if self.auth_token:
+                self.headers = {
+                    "Authorization": f"Bearer {self.auth_token}",
+                    "Content-Type": "application/json"
+                }
+                logger.info("Successfully authenticated with Xano")
+                return True
+            else:
+                logger.error("Login response did not contain authToken")
+                return False
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error logging in to Xano: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error during login: {e}")
+            return False
 
     # ==================== SESSION APIs ====================
     
@@ -41,7 +89,7 @@ class XanoClient:
         try:
             url = f"{XANO_SESSION_API_URL}/session"
             logger.info("Fetching all sessions from Xano")
-            response = self.session.get(url, timeout=self.timeout)
+            response = self.session.get(url, headers=self.headers, timeout=self.timeout)
             response.raise_for_status()
             sessions = response.json()
             logger.info(f"Successfully fetched {len(sessions)} sessions")
@@ -97,7 +145,7 @@ class XanoClient:
         try:
             url = f"{XANO_SESSION_API_URL}/session/{session_id}"
             logger.info(f"Fetching session {session_id} from Xano")
-            response = self.session.get(url, timeout=self.timeout)
+            response = self.session.get(url, headers=self.headers, timeout=self.timeout)
             response.raise_for_status()
             session_data = response.json()
             logger.info(f"Successfully fetched session {session_id}")
@@ -136,7 +184,7 @@ class XanoClient:
             url = f"{XANO_SESSION_API_URL}/session/{session_id}"
             payload = {"session_id": session_id, "Status": status}
             logger.info(f"Updating Xano session {session_id} status to {status}")
-            response = self.session.patch(url, json=payload, timeout=self.timeout)
+            response = self.session.patch(url, headers=self.headers, json=payload, timeout=self.timeout)
             response.raise_for_status()
             result = response.json()
             logger.info(f"Successfully updated session {session_id} status to {status}")
@@ -163,8 +211,10 @@ class XanoClient:
         """
         try:
             url = f"{XANO_SESSION_API_URL}/session/{session_id}"
+            # Include session_id in payload as required by Xano API
+            payload = {"session_id": session_id, **data}
             logger.info(f"Updating Xano session {session_id}")
-            response = self.session.patch(url, json=data, timeout=self.timeout)
+            response = self.session.patch(url, headers=self.headers, json=payload, timeout=self.timeout)
             response.raise_for_status()
             result = response.json()
             logger.info(f"Successfully updated session {session_id}")
@@ -189,7 +239,7 @@ class XanoClient:
         try:
             url = f"{XANO_SESSION_API_URL}/session/{session_id}"
             logger.info(f"Deleting Xano session {session_id}")
-            response = self.session.delete(url, timeout=self.timeout)
+            response = self.session.delete(url, headers=self.headers, timeout=self.timeout)
             response.raise_for_status()
             logger.info(f"Successfully deleted session {session_id}")
             return True
@@ -201,27 +251,27 @@ class XanoClient:
             return False
 
     # ==================== JOB APIs ====================
-    
-    def get_jobs(self) -> Optional[List[Dict[str, Any]]]:
-        """
-        Get all jobs from Xano
-        
-        Returns:
-            List of jobs if successful, None otherwise
-        """
+    def get_jobs(self):
+        url = f"{XANO_JOB_API_URL}/job"
+
         try:
-            url = f"{XANO_JOB_API_URL}/job"
             logger.info("Fetching all jobs from Xano")
-            response = self.session.get(url, timeout=self.timeout)
+            response = self.session.get(url, headers=self.headers, timeout=self.timeout)
             response.raise_for_status()
+            
             jobs = response.json()
             logger.info(f"Successfully fetched {len(jobs)} jobs")
             return jobs
+
+        except requests.exceptions.HTTPError as e:
+            logger.error(f"HTTP error fetching jobs from Xano: {e}")
+            logger.error(f"Response content: {response.text}")
+            return None
         except requests.exceptions.RequestException as e:
             logger.error(f"Error fetching jobs from Xano: {e}")
             return None
         except Exception as e:
-            logger.error(f"Unexpected error fetching jobs: {e}")
+            logger.error(f"Unexpected error in get_jobs(): {e}")
             return None
 
     def create_job(self, job_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -262,7 +312,7 @@ class XanoClient:
         try:
             url = f"{XANO_JOB_API_URL}/job/{job_id}"
             logger.info(f"Fetching job from Xano: {job_id}")
-            response = self.session.get(url, timeout=self.timeout)
+            response = self.session.get(url, headers=self.headers, timeout=self.timeout)
             response.raise_for_status()
             job = response.json()
             logger.info(f"Successfully fetched job: {job.get('job_title', 'Unknown')} (ID: {job_id})")
@@ -319,7 +369,7 @@ class XanoClient:
         try:
             url = f"{XANO_JOB_API_URL}/job/{job_id}"
             logger.info(f"Deleting job {job_id} from Xano")
-            response = self.session.delete(url, timeout=self.timeout)
+            response = self.session.delete(url, headers=self.headers, timeout=self.timeout)
             response.raise_for_status()
             logger.info(f"Successfully deleted job {job_id}")
             return True
@@ -342,7 +392,7 @@ class XanoClient:
         try:
             url = f"{XANO_CHAT_API_URL}/aichatmessages"
             logger.info("Fetching all messages from Xano")
-            response = self.session.get(url, timeout=self.timeout)
+            response = self.session.get(url, headers=self.headers, timeout=self.timeout)
             response.raise_for_status()
             messages = response.json()
             logger.info(f"Successfully fetched {len(messages)} messages")
@@ -367,7 +417,7 @@ class XanoClient:
         try:
             url = f"{XANO_CHAT_API_URL}/aichatmessages/{message_id}"
             logger.info(f"Fetching message {message_id} from Xano")
-            response = self.session.get(url, timeout=self.timeout)
+            response = self.session.get(url, headers=self.headers, timeout=self.timeout)
             response.raise_for_status()
             message = response.json()
             logger.info(f"Successfully fetched message {message_id}")
@@ -438,7 +488,7 @@ class XanoClient:
         try:
             url = f"{XANO_CHAT_API_URL}/aichatmessages/{message_id}"
             logger.info(f"Updating message {message_id} in Xano")
-            response = self.session.patch(url, json=data, timeout=self.timeout)
+            response = self.session.patch(url, headers=self.headers, json=data, timeout=self.timeout)
             response.raise_for_status()
             result = response.json()
             logger.info(f"Successfully updated message {message_id}")
@@ -463,7 +513,7 @@ class XanoClient:
         try:
             url = f"{XANO_CHAT_API_URL}/aichatmessages/{message_id}"
             logger.info(f"Deleting message {message_id} from Xano")
-            response = self.session.delete(url, timeout=self.timeout)
+            response = self.session.delete(url, headers=self.headers, timeout=self.timeout)
             response.raise_for_status()
             logger.info(f"Successfully deleted message {message_id}")
             return True
@@ -514,7 +564,7 @@ class XanoClient:
         try:
             url = f"{XANO_CANDIDATE_API_URL}/candidate"
             logger.info("Fetching all candidates from Xano")
-            response = self.session.get(url, timeout=self.timeout)
+            response = self.session.get(url, headers=self.headers, timeout=self.timeout)
             response.raise_for_status()
             candidates = response.json()
             logger.info(f"Successfully fetched {len(candidates)} candidates")
@@ -587,13 +637,16 @@ class XanoClient:
                 payload["Application"] = application
                 
             logger.info(f"Creating new candidate in Xano: {name}")
-            response = self.session.post(url, json=payload, timeout=self.timeout)
+            logger.debug(f"Candidate payload: {payload}")
+            response = self.session.post(url, headers=self.headers, json=payload, timeout=self.timeout)
             response.raise_for_status()
             result = response.json()
             logger.info(f"Successfully created candidate: {result.get('id', 'unknown')}")
             return result
         except requests.exceptions.RequestException as e:
             logger.error(f"Error creating candidate in Xano: {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                logger.error(f"Response content: {e.response.text}")
             return None
         except Exception as e:
             logger.error(f"Unexpected error creating candidate: {e}")
@@ -612,7 +665,7 @@ class XanoClient:
         try:
             url = f"{XANO_CANDIDATE_API_URL}/candidate/{candidate_id}"
             logger.info(f"Fetching candidate {candidate_id} from Xano")
-            response = self.session.get(url, timeout=self.timeout)
+            response = self.session.get(url, headers=self.headers, timeout=self.timeout)
             response.raise_for_status()
             candidate = response.json()
             logger.info(f"Successfully fetched candidate {candidate_id}")
@@ -646,7 +699,7 @@ class XanoClient:
         try:
             url = f"{XANO_CANDIDATE_API_URL}/candidate/{candidate_id}"
             logger.info(f"Updating candidate {candidate_id} in Xano")
-            response = self.session.patch(url, json=data, timeout=self.timeout)
+            response = self.session.patch(url, headers=self.headers, json=data, timeout=self.timeout)
             response.raise_for_status()
             result = response.json()
             logger.info(f"Successfully updated candidate {candidate_id}")
@@ -671,7 +724,7 @@ class XanoClient:
         try:
             url = f"{XANO_CANDIDATE_API_URL}/candidate/{candidate_id}"
             logger.info(f"Deleting candidate {candidate_id} from Xano")
-            response = self.session.delete(url, timeout=self.timeout)
+            response = self.session.delete(url, headers=self.headers, timeout=self.timeout)
             response.raise_for_status()
             logger.info(f"Successfully deleted candidate {candidate_id}")
             return True
@@ -694,7 +747,7 @@ class XanoClient:
         try:
             url = f"{XANO_COMPANY_API_URL}/company"
             logger.info("Fetching all companies from Xano")
-            response = self.session.get(url, timeout=self.timeout)
+            response = self.session.get(url, headers=self.headers, timeout=self.timeout)
             response.raise_for_status()
             companies = response.json()
             logger.info(f"Successfully fetched {len(companies)} companies")
@@ -755,7 +808,7 @@ class XanoClient:
                 payload["Company_Docs"] = company_docs
                 
             logger.info(f"Creating new company in Xano: {company_name}")
-            response = self.session.post(url, json=payload, timeout=self.timeout)
+            response = self.session.post(url, headers=self.headers,json=payload, timeout=self.timeout)
             response.raise_for_status()
             result = response.json()
             logger.info(f"Successfully created company: {result.get('id', 'unknown')}")
@@ -780,7 +833,7 @@ class XanoClient:
         try:
             url = f"{XANO_COMPANY_API_URL}/company/{company_id}"
             logger.info(f"Fetching company {company_id} from Xano")
-            response = self.session.get(url, timeout=self.timeout)
+            response = self.session.get(url, headers=self.headers, timeout=self.timeout)
             response.raise_for_status()
             company = response.json()
             logger.info(f"Successfully fetched company {company_id}")
@@ -814,7 +867,7 @@ class XanoClient:
         try:
             url = f"{XANO_COMPANY_API_URL}/company/{company_id}"
             logger.info(f"Updating company {company_id} in Xano")
-            response = self.session.patch(url, json=data, timeout=self.timeout)
+            response = self.session.patch(url, headers=self.headers, json=data, timeout=self.timeout)
             response.raise_for_status()
             result = response.json()
             logger.info(f"Successfully updated company {company_id}")
@@ -839,7 +892,7 @@ class XanoClient:
         try:
             url = f"{XANO_COMPANY_API_URL}/company/{company_id}"
             logger.info(f"Deleting company {company_id} from Xano")
-            response = self.session.delete(url, timeout=self.timeout)
+            response = self.session.delete(url, headers=self.headers, timeout=self.timeout)
             response.raise_for_status()
             logger.info(f"Successfully deleted company {company_id}")
             return True
@@ -855,19 +908,31 @@ class XanoClient:
         self.session.close()
 
 
-# Global client instance
-_xano_client = None
+class XanoClientSingleton:
+    """Singleton holder for XanoClient instance to avoid global variables."""
+    _instance: XanoClient = None
+    
+    @classmethod
+    def get_instance(cls) -> XanoClient:
+        """Get or create the XanoClient singleton instance."""
+        if cls._instance is None:
+            cls._instance = XanoClient()
+        return cls._instance
+    
+    @classmethod
+    def reset_instance(cls) -> None:
+        """Reset the singleton instance (useful for testing)."""
+        if cls._instance is not None:
+            cls._instance.close()
+            cls._instance = None
 
 
 def get_xano_client() -> XanoClient:
     """
-    Get or create global Xano client instance
+    Get or create Xano client instance using singleton pattern.
     
     Returns:
         XanoClient instance
     """
-    global _xano_client
-    if _xano_client is None:
-        _xano_client = XanoClient()
-    return _xano_client
+    return XanoClientSingleton.get_instance()
 

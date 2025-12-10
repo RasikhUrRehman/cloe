@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from chatbot.core.agent import CleoRAGAgent
 from chatbot.utils.config import ensure_directories, settings
 from chatbot.utils.utils import setup_logging
+from chatbot.utils.session_manager import get_session_manager
 
 # Import modular routes
 from chatbot.api.routes import (
@@ -25,10 +26,8 @@ from chatbot.api.routes import (
     companies_router,
     messages_router,
     applications_router,
+    questions_router,
 )
-from chatbot.api.routes.chat import set_active_sessions as set_chat_sessions
-from chatbot.api.routes.sessions import set_active_sessions as set_session_sessions
-from chatbot.api.routes.applications import set_active_sessions as set_app_sessions
 
 # Initialize logging
 logger = setup_logging()
@@ -52,13 +51,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# In-memory session storage (shared across all routes)
-active_sessions: Dict[str, CleoRAGAgent] = {}
-
-# Share active_sessions with route modules
-set_chat_sessions(active_sessions)
-set_session_sessions(active_sessions)
-set_app_sessions(active_sessions)
+# Initialize the session manager (singleton pattern, no globals needed)
+session_manager = get_session_manager()
+logger.info("Session manager initialized")
 
 # Include routers
 app.include_router(chat_router)
@@ -68,6 +63,7 @@ app.include_router(jobs_router)
 app.include_router(companies_router)
 app.include_router(messages_router)
 app.include_router(applications_router)
+app.include_router(questions_router)
 
 
 # Health check models
@@ -125,4 +121,4 @@ async def startup_event():
 async def shutdown_event():
     """Run on application shutdown"""
     logger.info("Cleo RAG Agent API shutting down...")
-    logger.info(f"Active sessions at shutdown: {len(active_sessions)}")
+    logger.info(f"Active sessions at shutdown: {len(session_manager.sessions)}")

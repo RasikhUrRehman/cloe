@@ -21,18 +21,10 @@ from chatbot.utils.config import settings
 from chatbot.utils.fit_score import FitScoreCalculator
 from chatbot.utils.utils import setup_logging
 from chatbot.utils.xano_client import get_xano_client
+from chatbot.utils.session_manager import get_session_manager
 
 logger = setup_logging()
 router = APIRouter(prefix="/api/v1/applications", tags=["Applications"])
-
-# Store for active sessions - will be shared from main app
-active_sessions: Dict[str, Any] = {}
-
-
-def set_active_sessions(sessions: Dict[str, Any]):
-    """Set the reference to active sessions from main app"""
-    global active_sessions
-    active_sessions = sessions
 
 
 # Response Models

@@ -13,30 +13,16 @@ from chatbot.state.states import SessionState, EngagementState
 from chatbot.utils.job_fetcher import get_job_by_id
 from chatbot.utils.utils import setup_logging
 from chatbot.utils.xano_client import get_xano_client
+from chatbot.utils.session_manager import get_session_manager
 
 logger = setup_logging()
 router = APIRouter(prefix="/api/v1/sessions", tags=["Sessions"])
 
-# Store for active sessions - will be shared from main app
-active_sessions: Dict[str, Any] = {}
-
-
-def set_active_sessions(sessions: Dict[str, Any]):
-    """Set the reference to active sessions from main app"""
-    global active_sessions
-    active_sessions = sessions
-
 
 def get_or_create_agent(session_id: str, job_id: str = None):
     """Get existing agent or create new one"""
-    from chatbot.core.agent import CleoRAGAgent
-    from chatbot.state.states import SessionState
-    
-    if session_id not in active_sessions:
-        session_state = SessionState(session_id=session_id)
-        agent = CleoRAGAgent(session_state=session_state, job_id=job_id)
-        active_sessions[session_id] = agent
-    return active_sessions[session_id]
+    session_manager = get_session_manager()
+    return session_manager.get_or_create_agent(session_id, job_id)
 
 
 # Request/Response Models
@@ -174,11 +160,20 @@ async def list_sessions():
 @router.get("/{session_id}/status", response_model=SessionStatusResponse)
 async def get_session_status(session_id: str):
     """
-    Get the current status of a session
+    Get the current status of a session.
+    Returns 404 if the session does not exist.
     """
     try:
-        agent = get_or_create_agent(session_id)
+        session_manager = get_session_manager()
+        
+        if not session_manager.has_session(session_id):
+            raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+        
+        agent = session_manager.get_session(session_id)
         summary = agent.get_conversation_summary()
+        
+        # Sync the current state to Xano to ensure it's up to date
+        agent.sync_session_state_to_xano()
         
         # Get verification_complete from agent state
         verification_complete = False
@@ -199,13 +194,52 @@ async def get_session_status(session_id: str):
         raise HTTPException(status_code=500, detail=f"Failed to get session status: {str(e)}")
 
 
+@router.get("/{session_id}/xano-status")
+async def get_session_xano_status(session_id: str):
+    """
+    Get the real-time synchronized session status from Xano.
+    This endpoint first syncs the local session state to Xano,
+    then returns the status as stored in Xano.
+    """
+    try:
+        session_manager = get_session_manager()
+        
+        if not session_manager.has_session(session_id):
+            raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+        
+        agent = session_manager.get_session(session_id)
+        
+        # First sync the current state to Xano
+        agent.sync_session_state_to_xano()
+        
+        # Then get the status from Xano
+        xano_status = agent.get_xano_session_status()
+        
+        return {
+            "session_id": session_id,
+            **xano_status,
+            "local_current_stage": agent.session_state.current_stage.value,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting Xano session status: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get Xano status: {str(e)}")
+
+
 @router.get("/{session_id}", response_model=SessionDetailsResponse)
 async def get_session_details(session_id: str):
     """
-    Get complete session details including chat history from Xano
+    Get complete session details including chat history from Xano.
+    Returns 404 if the session does not exist.
     """
     try:
-        agent = get_or_create_agent(session_id)
+        session_manager = get_session_manager()
+        
+        if not session_manager.has_session(session_id):
+            raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+        
+        agent = session_manager.get_session(session_id)
         summary = agent.get_conversation_summary()
         
         # Get chat history from Xano
@@ -271,10 +305,16 @@ async def get_session_details(session_id: str):
 @router.patch("/{session_id}")
 async def update_session(session_id: str, request: SessionUpdateRequest):
     """
-    Update session status or candidate_id in Xano
+    Update session status or candidate_id in Xano.
+    Returns 404 if the session does not exist.
     """
     try:
-        agent = get_or_create_agent(session_id)
+        session_manager = get_session_manager()
+        
+        if not session_manager.has_session(session_id):
+            raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+        
+        agent = session_manager.get_session(session_id)
         
         if not agent.session_state.engagement or not agent.session_state.engagement.xano_session_id:
             raise HTTPException(status_code=404, detail="Session not found in Xano")
@@ -312,15 +352,16 @@ async def delete_session(session_id: str):
     """
     try:
         xano_client = get_xano_client()
+        session_manager = get_session_manager()
         
-        if session_id in active_sessions:
-            agent = active_sessions[session_id]
+        if session_manager.has_session(session_id):
+            agent = session_manager.get_session(session_id)
             
             # Delete from Xano if exists
             if agent.session_state.engagement and agent.session_state.engagement.xano_session_id:
                 xano_client.delete_session(agent.session_state.engagement.xano_session_id)
             
-            del active_sessions[session_id]
+            session_manager.remove_session(session_id)
             logger.info(f"Deleted session: {session_id}")
             return {"message": f"Session {session_id} deleted successfully"}
         else:
@@ -338,8 +379,10 @@ async def reset_session(session_id: str):
     Reset a session's conversation memory
     """
     try:
-        if session_id in active_sessions:
-            agent = active_sessions[session_id]
+        session_manager = get_session_manager()
+        
+        if session_manager.has_session(session_id):
+            agent = session_manager.get_session(session_id)
             agent.reset_conversation()
             logger.info(f"Reset session: {session_id}")
             return {"message": f"Session {session_id} reset successfully"}
@@ -356,10 +399,22 @@ async def reset_session(session_id: str):
 @router.get("/xano/{xano_session_id}")
 async def get_xano_session(xano_session_id: int):
     """
-    Get session directly from Xano by Xano session ID
+    Get session directly from Xano by Xano session ID.
+    If there's an active agent with this Xano session, it will sync the state first.
     """
     try:
         xano_client = get_xano_client()
+        session_manager = get_session_manager()
+        
+        # Try to find the active agent with this xano_session_id and sync its state
+        for local_session_id, agent in session_manager.sessions.items():
+            if (agent.session_state.engagement and 
+                agent.session_state.engagement.xano_session_id == xano_session_id):
+                # Found the active agent, sync its state to Xano first
+                agent.sync_session_state_to_xano()
+                logger.info(f"Synced active agent state for xano_session {xano_session_id}")
+                break
+        
         session = xano_client.get_session_by_id(xano_session_id)
         if session:
             return session

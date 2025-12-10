@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from chatbot.utils.utils import setup_logging
 from chatbot.utils.xano_client import get_xano_client
+from chatbot.utils.session_manager import get_session_manager
 
 logger = setup_logging()
 router = APIRouter(prefix="/api/v1/chat", tags=["Chat"])
@@ -78,32 +79,17 @@ def _validate_api_responses(responses: List[str]) -> List[str]:
     return validated
 
 
-# Store for active sessions - will be shared from main app
-active_sessions: Dict[str, Any] = {}
-
-
-def set_active_sessions(sessions: Dict[str, Any]):
-    """Set the reference to active sessions from main app"""
-    global active_sessions
-    active_sessions = sessions
-
-
 def get_or_create_agent(session_id: str, job_id: str = None):
     """Get existing agent or create new one"""
-    from chatbot.core.agent import CleoRAGAgent
-    from chatbot.state.states import SessionState
-    
-    if session_id not in active_sessions:
-        session_state = SessionState(session_id=session_id)
-        agent = CleoRAGAgent(session_state=session_state, job_id=job_id)
-        active_sessions[session_id] = agent
-    return active_sessions[session_id]
+    session_manager = get_session_manager()
+    return session_manager.get_or_create_agent(session_id, job_id)
 
 
 @router.post("", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     """
-    Send a message and get a response
+    Send a message and get a response.
+    Requires an existing session - returns 404 if session not found.
     
     Args:
         request: Chat request with session_id and message
@@ -112,7 +98,12 @@ async def chat(request: ChatRequest):
         Chat response with agent's reply (can be multiple messages)
     """
     try:
-        agent = get_or_create_agent(request.session_id)
+        session_manager = get_session_manager()
+        
+        if not session_manager.has_session(request.session_id):
+            raise HTTPException(status_code=404, detail=f"Session {request.session_id} not found. Please create a session first.")
+        
+        agent = session_manager.get_session(request.session_id)
         
         # Post user message to Xano
         xano_client = get_xano_client()

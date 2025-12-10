@@ -10,6 +10,7 @@ from chatbot.api.routes.jobs import router as jobs_router
 from chatbot.api.routes.companies import router as companies_router
 from chatbot.api.routes.messages import router as messages_router
 from chatbot.api.routes.applications import router as applications_router
+from chatbot.api.routes.questions import router as questions_router
 
 __all__ = [
     "chat_router",
@@ -19,4 +20,5 @@ __all__ = [
     "companies_router",
     "messages_router",
     "applications_router",
+    "questions_router",
 ]
