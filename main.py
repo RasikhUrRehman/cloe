@@ -14,6 +14,7 @@ from chatbot.state.states import SessionState, ConversationStage
 from chatbot.utils.report_generator import ReportGenerator
 from chatbot.utils.config import ensure_directories
 from chatbot.utils.utils import setup_logging
+from chatbot.utils.xano_client import XanoClient
 
 logger = setup_logging()
 
@@ -25,7 +26,8 @@ class CleoApplication:
         """Initialize the Cleo application"""
         ensure_directories()
         self.agent: Optional[CleoRAGAgent] = None
-        self.report_generator = ReportGenerator()
+        self.xano_client = XanoClient()
+        self.report_generator = ReportGenerator(xano_client=self.xano_client)
 
     def start_new_session(self) -> str:
         """

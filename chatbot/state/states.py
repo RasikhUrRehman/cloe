@@ -29,6 +29,8 @@ class EngagementState(BaseModel):
     language: str = "en"
     stage_completed: bool = False
     xano_session_id: Optional[int] = None  # Xano backend session ID
+    candidate_id: Optional[int] = None  # Xano candidate ID
+    
     class Config:
         use_enum_values = True
 class QualificationState(BaseModel):

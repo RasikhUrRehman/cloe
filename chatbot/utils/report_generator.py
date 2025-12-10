@@ -17,39 +17,42 @@ from chatbot.utils.utils import setup_logging
 logger = setup_logging()
 class ReportGenerator:
     """Generates eligibility reports for job applications"""
-    def __init__(self):
+    def __init__(self, xano_client=None):
         self.reports_dir = settings.REPORTS_DIR
         os.makedirs(self.reports_dir, exist_ok=True)
         self.fit_calculator = FitScoreCalculator()
+        self.xano_client = xano_client
+
     def generate_report(
-        self, session_id: str, include_fit_score: bool = None
+        self, session_id: str, include_fit_score: bool = None, app_data: Dict = None
     ) -> Dict[str, str]:
         """
         Generate both JSON and PDF reports for a session
         Args:
             session_id: Session identifier
             include_fit_score: Whether to include fit score in report
+            app_data: Application data dict (optional, will fetch from Xano if not provided)
         Returns:
             Dictionary with paths to generated reports
         """
         if include_fit_score is None:
             include_fit_score = settings.INCLUDE_FIT_SCORE_IN_REPORT
-        # Load application data from JSON file
-        application_file = os.path.join("./applications", f"application_{session_id}.json")
-        if not os.path.exists(application_file):
+        
+        # If app_data not provided, try to fetch from Xano
+        if app_data is None:
+            app_data = self._fetch_application_from_xano(session_id)
+        
+        if not app_data:
             raise ValueError(f"No application data found for session {session_id}")
         
-        with open(application_file, 'r') as f:
-            app_data = json.load(f)
-        
-        # Extract data from application file
+        # Extract data from application data
         engagement_data = app_data.get('engagement', {})
         qualification_data = app_data.get('qualification', {})
         application_data = app_data.get('application', {})
         verification_data = app_data.get('verification', {})
         fit_score_data = app_data.get('fit_score', {})
         
-        # Use fit score from application file
+        # Use fit score from application data
         fit_score = FitScoreComponents(
             total_score=fit_score_data.get('total_score', 0),
             qualification_score=fit_score_data.get('qualification_score', 0),
@@ -77,6 +80,65 @@ class ReportGenerator:
             "pdf_report": pdf_path,
             "session_id": session_id,
         }
+
+    def _fetch_application_from_xano(self, session_id: str) -> Dict:
+        """
+        Fetch application data from Xano
+        Args:
+            session_id: Session identifier (can be internal UUID or Xano session ID)
+        Returns:
+            Application data dict or None
+        """
+        if not self.xano_client:
+            logger.warning("No Xano client provided, cannot fetch from Xano")
+            return None
+        
+        try:
+            # Try to get session by ID (assuming session_id could be xano_session_id)
+            session = None
+            
+            # First try as xano_session_id
+            if isinstance(session_id, int) or (isinstance(session_id, str) and session_id.isdigit()):
+                session = self.xano_client.get_session_by_id(int(session_id))
+            
+            if not session:
+                # Try searching through sessions by internal session_id
+                sessions = self.xano_client.get_sessions()
+                for s in sessions:
+                    if s.get('session_id') == session_id:
+                        session = s
+                        break
+            
+            if not session:
+                logger.warning(f"Session {session_id} not found in Xano")
+                return None
+            
+            # Parse application_data from session if it exists
+            app_data_str = session.get('application_data')
+            if app_data_str:
+                if isinstance(app_data_str, str):
+                    return json.loads(app_data_str)
+                return app_data_str
+            
+            # Build application data from session fields
+            return {
+                "session_id": session.get('session_id', session_id),
+                "engagement": {},
+                "qualification": {},
+                "application": {
+                    "full_name": session.get('candidate_name'),
+                    "email": session.get('candidate_email'),
+                    "phone_number": session.get('candidate_phone'),
+                },
+                "verification": {},
+                "fit_score": {
+                    "total_score": session.get('fit_score', 0),
+                }
+            }
+        except Exception as e:
+            logger.error(f"Error fetching application from Xano: {e}")
+            return None
+
     def _create_report_data(
         self,
         session_id: str,

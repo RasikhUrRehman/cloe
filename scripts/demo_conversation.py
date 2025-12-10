@@ -128,7 +128,7 @@ def simulate_conversation():
     
     # Generate report
     print_separator("Generating Eligibility Report")
-    report_gen = ReportGenerator()
+    report_gen = ReportGenerator(xano_client=agent.xano_client)
     
     try:
         result = report_gen.generate_report(
