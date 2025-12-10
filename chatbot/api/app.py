@@ -21,10 +21,6 @@ from chatbot.utils.session_manager import get_session_manager
 from chatbot.api.routes import (
     chat_router,
     sessions_router,
-    candidates_router,
-    jobs_router,
-    companies_router,
-    messages_router,
     applications_router,
     questions_router,
 )
@@ -58,10 +54,6 @@ logger.info("Session manager initialized")
 # Include routers
 app.include_router(chat_router)
 app.include_router(sessions_router)
-app.include_router(candidates_router)
-app.include_router(jobs_router)
-app.include_router(companies_router)
-app.include_router(messages_router)
 app.include_router(applications_router)
 app.include_router(questions_router)
 
