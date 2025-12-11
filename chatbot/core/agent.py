@@ -54,10 +54,13 @@ class CleoRAGAgent:
             self.session_state.engagement = EngagementState(session_id=self.session_state.session_id)
         
         if not self.session_state.engagement.xano_session_id:
-            xano_session = self.xano_client.create_session(initial_status="Started")
+            xano_session = self.xano_client.create_session(initial_status="Started", job_id=self.job_id)
             if xano_session:
                 self.session_state.engagement.xano_session_id = xano_session.get('id')
-                logger.info(f"Created Xano session {self.session_state.engagement.xano_session_id} for session {self.session_state.session_id}")
+                # Also store job_id in engagement state for consistency
+                if self.job_id:
+                    self.session_state.engagement.job_id = self.job_id
+                logger.info(f"Created Xano session {self.session_state.engagement.xano_session_id} for session {self.session_state.session_id} with job_id: {self.job_id}")
             else:
                 logger.warning(f"Failed to create Xano session for {self.session_state.session_id}")
         

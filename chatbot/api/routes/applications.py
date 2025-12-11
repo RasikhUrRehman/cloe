@@ -31,12 +31,10 @@ router = APIRouter(prefix="/api/v1/applications", tags=["Applications"])
 class ApplicationResponse(BaseModel):
     """Response model for application data"""
     session_id: int  # Xano session ID
-    candidate_id: Optional[int] = None
     timestamp: Any  # Can be int or str
     job: Optional[Dict[str, Any]] = None
     company: Optional[Dict[str, Any]] = None
     applicant: Optional[Dict[str, Any]] = None
-    application_file: Optional[Dict[str, Any]] = None
     fit_score: Optional[Dict[str, Any]] = None
     status: Optional[str] = None
     conversation_summary: Optional[Dict[str, Any]] = None  # Contains discussion_summary, strengths, weaknesses, overall_impression
@@ -45,7 +43,6 @@ class ApplicationResponse(BaseModel):
 class ApplicationSummary(BaseModel):
     """Summary model for application list"""
     session_id: int  # Xano session ID
-    candidate_id: Optional[int] = None
     timestamp: Optional[Any] = None  # Can be int or str
     applicant_name: Optional[str] = None
     applicant_email: Optional[str] = None
@@ -58,79 +55,75 @@ class ApplicationSummary(BaseModel):
 
 def _build_application_data_from_xano(session_id: int) -> Dict[str, Any]:
     """
-    Build application data entirely from Xano.
+    Build application data entirely from Xano session.
     
-    Session only contains: candidate_id and Status
-    Candidate contains: Name, Score, Email, Phone, Report_pdf, job_id, company_id, 
-                       Status, user_id, session_id, Application
+    Session contains: candidate_name, candidate_email, candidate_phone, Status, job_id, etc.
+    No candidate table lookup needed - all info stored in session.
     """
     xano_client = get_xano_client()
     
-    # Get session from Xano (only has candidate_id and Status)
+    # Get session from Xano
     session = xano_client.get_session_by_id(session_id)
     if not session:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found in Xano")
     
-    # Get candidate data using candidate_id from session
-    candidate_data = None
-    candidate_id = session.get('candidate_id')
-    if candidate_id:
-        candidate_data = xano_client.get_candidate_by_id(candidate_id)
-    
-    if not candidate_data:
-        raise HTTPException(status_code=404, detail=f"Candidate not found for session {session_id}")
-    
     # Get messages from Xano
     messages = xano_client.get_messages_by_session_id(session_id) or []
     
-    # Build applicant info from candidate data
+    # Build applicant info from session data (not candidate table)
     applicant_info = {
-        "name": candidate_data.get("Name"),
-        "email": candidate_data.get("Email"),
-        "phone": candidate_data.get("Phone"),
-        "score": candidate_data.get("Score"),
-        "status": candidate_data.get("Status"),
-        "report_pdf": candidate_data.get("Report_pdf"),
-        "user_id": candidate_data.get("user_id"),
+        "name": session.get("candidate_name"),
+        "email": session.get("candidate_email"),
+        "phone": session.get("candidate_phone"),
+        "score": session.get("fit_score"),
+        "status": session.get("Status"),
     }
     
-    # Get job details using job_id from candidate data
+    # Get job details using job_id from session
     job_details = None
-    job_id = candidate_data.get('job_id')
+    job_id = session.get('job_id')
     if job_id:
         job_details = xano_client.get_job_by_id(job_id)
     
-    # Get company details using company_id from candidate data
+    # Get company details using company_id from session or job
     company_details = None
-    company_id = candidate_data.get('company_id')
+    company_id = session.get('company_id')
+    if not company_id and job_details:
+        company_id = job_details.get('company_id')
     if company_id:
         company_details = xano_client.get_company_by_id(company_id)
     
-    # Get application file info from candidate
-    application_file = candidate_data.get('Application')
-    
-    # Build fit score from candidate Score
-    fit_score_data = None
-    candidate_score = candidate_data.get('Score')
-    if candidate_score is not None:
-        fit_score_data = {
-            "total_score": candidate_score,
-            "rating": _get_rating_from_score(candidate_score),
-        }
-    
-    # Generate conversation summary from messages using LLM
+    # Generate conversation summary from messages using LLM (includes fit score)
     conversation_summary = _generate_conversation_summary(messages, job_details)
+    
+    # Build fit score - prefer session score, fallback to LLM-calculated score
+    session_score = session.get('fit_score')
+    if session_score is not None:
+        fit_score_data = {
+            "total_score": session_score,
+            "rating": _get_rating_from_score(session_score),
+        }
+    elif conversation_summary.get('fit_score') is not None:
+        # Use LLM-calculated fit score from conversation analysis
+        llm_score = conversation_summary.get('fit_score')
+        fit_score_data = {
+            "total_score": llm_score,
+            "rating": _get_rating_from_score(llm_score),
+        }
+        # Update session with calculated fit score
+        xano_client.update_session(session_id, {"fit_score": llm_score})
+        logger.info(f"Updated session {session_id} with LLM-calculated fit score: {llm_score}")
+    else:
+        fit_score_data = None
     
     return {
         "session_id": session_id,
-        "candidate_id": candidate_id,
         "timestamp": session.get('created_at'),
         "job": job_details,
         "company": company_details,
         "applicant": applicant_info,
-        "application_file": application_file,
         "fit_score": fit_score_data,
-        "status": session.get('Status', candidate_data.get('Status', 'unknown')),
+        "status": session.get('Status', 'unknown'),
         "conversation_summary": conversation_summary,
     }
 
@@ -145,6 +138,7 @@ def _generate_conversation_summary(messages: List[Dict[str, Any]], job_details: 
             "discussion_summary": "No conversation recorded.",
             "strengths": [],
             "weaknesses": [],
+            "fit_score": None,
             "overall_impression": "Unable to assess - no conversation data.",
         }
     
@@ -168,40 +162,47 @@ Location: {job_details.get('location', 'N/A')}
 Requirements: {job_details.get('requirements', 'N/A')}
 """
     
-    # Create prompt for the LLM
-    summary_prompt = f"""Analyze the following job application conversation and provide a structured assessment.
+    # Create prompt for the LLM - Concise candidate review with fit score
+    summary_prompt = f"""You are an HR analyst summarizing a job application conversation. Provide a clear, concise assessment with a fit score.
 
 {f"JOB DETAILS:{job_context}" if job_context else ""}
 
 CONVERSATION TRANSCRIPT:
 {transcript}
 
-Please provide your analysis in the following exact format (use these exact headers):
+Provide your assessment in this exact format:
 
 DISCUSSION SUMMARY:
-[Provide a 2-3 sentence summary of what was discussed during the conversation]
+[Write 2-3 sentences summarizing what was discussed - candidate background, qualifications mentioned, and key points from the conversation.]
 
 CANDIDATE STRENGTHS:
-- [Strength 1]
-- [Strength 2]
-- [Strength 3]
-(List 3-5 key strengths demonstrated by the candidate)
+- [Key strength 1]
+- [Key strength 2]
+- [Key strength 3]
+(List 2-4 clear strengths based on the conversation)
 
-CANDIDATE WEAKNESSES:
-- [Weakness 1]
-- [Weakness 2]
-(List any concerns, gaps, or areas for improvement. If none apparent, state "No significant weaknesses identified")
+AREAS OF CONCERN:
+- [Concern 1]
+- [Concern 2]
+(List any gaps or concerns. If none, write "No significant concerns noted.")
 
-OVERALL IMPRESSION:
-[1-2 sentences giving an overall hiring recommendation or impression]
+FIT SCORE: [X]/100
+[Give a numerical score from 0-100 based on:
+- Communication quality (0-25): How well did the candidate communicate?
+- Engagement level (0-25): How engaged and interested was the candidate?
+- Qualification match (0-25): Based on what was discussed, how qualified do they seem?
+- Overall impression (0-25): Professional demeanor, enthusiasm, clarity]
+
+HIRING RECOMMENDATION:
+[One sentence: Strong Fit (80-100) / Good Fit (60-79) / Moderate Fit (40-59) / Not Recommended (<40) - with brief justification]
 """
     
     try:
         # Use LLM to generate the summary
         llm = ChatOpenAI(
-            model=settings.model_name,
+            model=settings.OPENAI_CHAT_MODEL,
             temperature=0.3,
-            api_key=settings.openai_api_key,
+            api_key=settings.OPENAI_API_KEY,
         )
         
         response = llm.invoke(summary_prompt)
@@ -219,6 +220,7 @@ OVERALL IMPRESSION:
             "discussion_summary": f"Conversation with {len(messages)} messages exchanged.",
             "strengths": ["Engaged in the application process"],
             "weaknesses": ["Unable to perform detailed analysis"],
+            "fit_score": 50,
             "overall_impression": "Manual review recommended.",
         }
 
@@ -229,6 +231,7 @@ def _parse_llm_summary(response_text: str) -> Dict[str, Any]:
         "discussion_summary": "",
         "strengths": [],
         "weaknesses": [],
+        "fit_score": None,
         "overall_impression": "",
     }
     
@@ -243,15 +246,21 @@ def _parse_llm_summary(response_text: str) -> Dict[str, Any]:
         # Detect section headers
         if 'DISCUSSION SUMMARY:' in line.upper():
             current_section = 'summary'
-            # Check if content is on the same line
             content = line.split(':', 1)[-1].strip()
             if content:
                 result["discussion_summary"] = content
         elif 'CANDIDATE STRENGTHS:' in line.upper() or 'STRENGTHS:' in line.upper():
             current_section = 'strengths'
-        elif 'CANDIDATE WEAKNESSES:' in line.upper() or 'WEAKNESSES:' in line.upper():
+        elif 'AREAS OF CONCERN:' in line.upper() or 'WEAKNESSES:' in line.upper() or 'CANDIDATE WEAKNESSES:' in line.upper():
             current_section = 'weaknesses'
-        elif 'OVERALL IMPRESSION:' in line.upper():
+        elif 'FIT SCORE:' in line.upper():
+            current_section = 'fit_score'
+            # Extract score from line like "FIT SCORE: 75/100" or "FIT SCORE: 75"
+            import re
+            score_match = re.search(r'(\d+)\s*/?\s*100?', line)
+            if score_match:
+                result["fit_score"] = int(score_match.group(1))
+        elif 'HIRING RECOMMENDATION:' in line.upper() or 'OVERALL IMPRESSION:' in line.upper():
             current_section = 'impression'
             content = line.split(':', 1)[-1].strip()
             if content:
@@ -264,6 +273,12 @@ def _parse_llm_summary(response_text: str) -> Dict[str, Any]:
                 result["strengths"].append(line[1:].strip())
             elif current_section == 'weaknesses' and line.startswith('-'):
                 result["weaknesses"].append(line[1:].strip())
+            elif current_section == 'fit_score' and result["fit_score"] is None:
+                # Try to extract score from continuation line
+                import re
+                score_match = re.search(r'(\d+)\s*/?\s*100?', line)
+                if score_match:
+                    result["fit_score"] = int(score_match.group(1))
             elif current_section == 'impression' and not result["overall_impression"]:
                 result["overall_impression"] = line
             elif current_section == 'summary':
@@ -277,7 +292,9 @@ def _parse_llm_summary(response_text: str) -> Dict[str, Any]:
     if not result["strengths"]:
         result["strengths"] = ["Completed the application process"]
     if not result["weaknesses"]:
-        result["weaknesses"] = ["No significant weaknesses identified"]
+        result["weaknesses"] = ["No significant concerns noted"]
+    if result["fit_score"] is None:
+        result["fit_score"] = 50  # Default moderate score
     if not result["overall_impression"]:
         result["overall_impression"] = "Review recommended."
     
@@ -410,30 +427,6 @@ def _generate_pdf_from_data(application_data: Dict[str, Any]) -> bytes:
         elements.append(table)
         elements.append(Spacer(1, 12))
     
-    # Application File Info
-    application_file = application_data.get('application_file', {})
-    if application_file and isinstance(application_file, dict):
-        elements.append(Paragraph("Application Document", heading_style))
-        file_data = [
-            ["File Name:", str(application_file.get('name', 'N/A'))],
-            ["File Type:", str(application_file.get('type', application_file.get('mime', 'N/A')))],
-            ["Access:", str(application_file.get('access', 'N/A'))],
-        ]
-        if application_file.get('size'):
-            size_kb = application_file.get('size', 0) / 1024
-            file_data.append(["Size:", f"{size_kb:.2f} KB"])
-        
-        table = Table(file_data, colWidths=[1.5*inch, 4.5*inch])
-        table.setStyle(TableStyle([
-            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-            ('FONTSIZE', (0, 0), (-1, -1), 10),
-            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-        ]))
-        elements.append(table)
-        elements.append(Spacer(1, 12))
-    
     # Fit Score
     fit_score = application_data.get('fit_score', {})
     if fit_score:
@@ -489,35 +482,48 @@ def _generate_pdf_from_data(application_data: Dict[str, Any]) -> bytes:
         strengths = conversation_summary.get('strengths', [])
         if strengths:
             for strength in strengths:
-                # Use bullet point style
                 elements.append(Paragraph(f"• {strength}", normal_style))
                 elements.append(Spacer(1, 2))
         else:
             elements.append(Paragraph("No strengths identified.", normal_style))
         elements.append(Spacer(1, 12))
         
-        # Candidate Weaknesses
-        elements.append(Paragraph("Areas for Improvement", heading_style))
+        # Areas of Concern
+        elements.append(Paragraph("Areas of Concern", heading_style))
         weaknesses = conversation_summary.get('weaknesses', [])
         if weaknesses:
             for weakness in weaknesses:
                 elements.append(Paragraph(f"• {weakness}", normal_style))
                 elements.append(Spacer(1, 2))
         else:
-            elements.append(Paragraph("No significant concerns identified.", normal_style))
+            elements.append(Paragraph("No significant concerns noted.", normal_style))
         elements.append(Spacer(1, 12))
         
-        # Overall Impression
-        elements.append(Paragraph("Overall Assessment", heading_style))
+        # Hiring Recommendation with fit score color
+        elements.append(Paragraph("Hiring Recommendation", heading_style))
         overall = conversation_summary.get('overall_impression', 'Review recommended.')
         
-        # Create a styled box for overall impression
+        # Determine color based on recommendation
+        recommendation_text = overall.lower()
+        if 'strong fit' in recommendation_text:
+            bg_color = colors.HexColor('#d4edda')  # Green
+        elif 'good fit' in recommendation_text:
+            bg_color = colors.HexColor('#d4edda')  # Green
+        elif 'moderate fit' in recommendation_text:
+            bg_color = colors.HexColor('#fff3cd')  # Yellow
+        elif 'not recommend' in recommendation_text:
+            bg_color = colors.HexColor('#f8d7da')  # Red
+        else:
+            bg_color = colors.HexColor('#e8f4fd')  # Light blue
+        
         impression_style = ParagraphStyle(
             'Impression',
             parent=normal_style,
             fontSize=11,
             leading=14,
             spaceAfter=6,
+            backColor=bg_color,
+            borderPadding=8,
         )
         elements.append(Paragraph(overall, impression_style))
         elements.append(Spacer(1, 12))
@@ -621,47 +627,38 @@ async def list_applications(session_ids: Optional[str] = None, limit: int = 100,
 def _build_application_summary(session: Dict[str, Any], xano_client) -> ApplicationSummary:
     """
     Build application summary from session data.
-    Session only has: candidate_id and Status.
-    Candidate has: Name, Score, Email, Phone, job_id, company_id, Status, etc.
+    Session contains: candidate_name, candidate_email, candidate_phone, fit_score, job_id, Status, etc.
+    No candidate table lookup needed.
     """
     session_id = session.get('id')
-    candidate_id = session.get('candidate_id')
-    applicant_name = None
-    applicant_email = None
-    fit_score = None
+    applicant_name = session.get('candidate_name')
+    applicant_email = session.get('candidate_email')
+    fit_score = session.get('fit_score')
     rating = None
     job_title = None
     company = None
     
-    # Get candidate info if linked - candidate has job_id and company_id
-    if candidate_id:
-        candidate = xano_client.get_candidate_by_id(candidate_id)
-        if candidate:
-            applicant_name = candidate.get('Name')
-            applicant_email = candidate.get('Email')
-            fit_score = candidate.get('Score')
-            if fit_score is not None:
-                rating = _get_rating_from_score(fit_score)
-            
-            # Get job info using job_id from candidate (not session)
-            job_id = candidate.get('job_id')
-            if job_id:
-                job = xano_client.get_job_by_id(job_id)
-                if job:
-                    job_title = job.get('job_title')
-                    company = job.get('company')
-            
-            # If no company from job, try to get from company_id
-            if not company:
-                company_id = candidate.get('company_id')
-                if company_id:
-                    company_data = xano_client.get_company_by_id(company_id)
-                    if company_data:
-                        company = company_data.get('name', company_data.get('company_name'))
+    if fit_score is not None:
+        rating = _get_rating_from_score(fit_score)
+    
+    # Get job info using job_id from session
+    job_id = session.get('job_id')
+    if job_id:
+        job = xano_client.get_job_by_id(job_id)
+        if job:
+            job_title = job.get('job_title')
+            company = job.get('company')
+    
+    # If no company from job, try to get from company_id in session
+    if not company:
+        company_id = session.get('company_id')
+        if company_id:
+            company_data = xano_client.get_company_by_id(company_id)
+            if company_data:
+                company = company_data.get('name', company_data.get('company_name'))
     
     return ApplicationSummary(
         session_id=session_id,
-        candidate_id=candidate_id,
         timestamp=session.get('created_at'),
         applicant_name=applicant_name,
         applicant_email=applicant_email,
@@ -676,7 +673,7 @@ def _build_application_summary(session: Dict[str, Any], xano_client) -> Applicat
 @router.post("/{session_id}/calculate_fit_score")
 async def calculate_fit_score(session_id: int):
     """
-    Calculate fit score for a Xano session and update candidate
+    Calculate fit score for a Xano session and update session with the score
     
     Args:
         session_id: Xano session ID (integer)
@@ -738,11 +735,8 @@ async def calculate_fit_score(session_id: int):
         total_score = engagement_score + completion_score + quality_score
         rating = _get_rating_from_score(total_score)
         
-        # Update candidate score in Xano if candidate exists
-        candidate_id = session.get('candidate_id')
-        if candidate_id:
-            xano_client.update_candidate(candidate_id, {"Score": total_score, "Status": rating})
-        
+        # Update session with fit score (no candidate table update)
+        xano_client.update_session(session_id, {"fit_score": total_score, "Status": rating})
         
         logger.info(f"Fit score calculated for session {session_id}: {total_score}")
         
