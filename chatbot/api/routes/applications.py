@@ -169,39 +169,42 @@ Requirements: {job_details.get('requirements', 'N/A')}
 """
     
     # Create prompt for the LLM
-    summary_prompt = f"""Analyze the following job application conversation and provide a structured assessment.
+    summary_prompt = f"""You are an expert HR analyst reviewing a job application conversation. Analyze the following conversation deeply and provide a comprehensive assessment of the candidate.
 
 {f"JOB DETAILS:{job_context}" if job_context else ""}
 
 CONVERSATION TRANSCRIPT:
 {transcript}
 
-Please provide your analysis in the following exact format (use these exact headers):
+Carefully read through the entire conversation and extract meaningful insights about this candidate. Pay attention to:
+- What specific experience, skills, or qualifications they mentioned
+- How they communicate (clarity, professionalism, enthusiasm)
+- Their work history, education, or relevant background
+- Their motivations, goals, and interest in the role
+- Any red flags or concerns
+- Their personality traits and attitude
+
+Provide your analysis in the following exact format (use these exact headers):
 
 DISCUSSION SUMMARY:
-[Provide a 2-3 sentence summary of what was discussed during the conversation]
+[Write a comprehensive 4-6 sentence summary covering: what topics were discussed, key information the candidate shared about their background and experience, their level of engagement, and the overall flow of the conversation. Be specific about details they shared.]
 
 CANDIDATE STRENGTHS:
-- [Strength 1]
-- [Strength 2]
-- [Strength 3]
-(List 3-5 key strengths demonstrated by the candidate)
+- [List 4-7 specific strengths demonstrated by the candidate. Include concrete examples from the conversation where possible. Consider: relevant experience, technical skills, soft skills, communication quality, enthusiasm, professionalism, work ethic indicators, education, certifications, or other positive attributes they demonstrated. Be specific and detailed.]
 
 CANDIDATE WEAKNESSES:
-- [Weakness 1]
-- [Weakness 2]
-(List any concerns, gaps, or areas for improvement. If none apparent, state "No significant weaknesses identified")
+- [List 2-5 concerns, gaps, or areas for improvement you identified. Consider: lack of required experience, communication issues, missing qualifications, concerns about fit, red flags, gaps in information, areas where they could improve, or skills they may need to develop. Be honest but professional. If truly no concerns exist, you may state "No significant concerns identified during initial conversation" but try to find at least 1-2 developmental areas.]
 
 OVERALL IMPRESSION:
-[1-2 sentences giving an overall hiring recommendation or impression]
+[Write 2-4 sentences giving a thoughtful overall assessment. Include: your recommendation (e.g., "Strong candidate", "Promising candidate with some concerns", "Recommend proceeding to next round"), key reasons for your recommendation, any next steps or additional information needed, and overall fit for the role. Be balanced and professional.]
 """
     
     try:
         # Use LLM to generate the summary
         llm = ChatOpenAI(
-            model=settings.model_name,
+            model=settings.OPENAI_CHAT_MODEL,
             temperature=0.3,
-            api_key=settings.openai_api_key,
+            api_key=settings.OPENAI_API_KEY,
         )
         
         response = llm.invoke(summary_prompt)
@@ -212,14 +215,29 @@ OVERALL IMPRESSION:
         return summary_data
         
     except Exception as e:
-        logger.error(f"Error generating LLM summary: {e}")
-        # Fallback to basic summary
+        logger.error(f"Error generating LLM summary: {e}", exc_info=True)
+        # Fallback to basic summary with more detail
         user_messages = [m for m in messages if m.get('MsgCreator') == 'User']
+        agent_messages = [m for m in messages if m.get('MsgCreator') != 'User']
+        
+        # Try to extract some basic insights even without LLM
+        user_text = " ".join([m.get('MsgContent', '') for m in user_messages]).lower()
+        basic_strengths = ["Participated in the application conversation"]
+        if len(user_messages) >= 10:
+            basic_strengths.append("Engaged actively with multiple responses")
+        if any(word in user_text for word in ['experience', 'worked', 'years', 'position']):
+            basic_strengths.append("Discussed work experience during conversation")
+        if any(word in user_text for word in ['skills', 'able', 'can', 'knowledge']):
+            basic_strengths.append("Mentioned relevant skills or capabilities")
+            
         return {
-            "discussion_summary": f"Conversation with {len(messages)} messages exchanged.",
-            "strengths": ["Engaged in the application process"],
-            "weaknesses": ["Unable to perform detailed analysis"],
-            "overall_impression": "Manual review recommended.",
+            "discussion_summary": f"Conversation included {len(messages)} total messages with {len(user_messages)} candidate responses and {len(agent_messages)} interviewer messages. The candidate participated in the application process and responded to questions. Due to a technical issue, detailed AI analysis could not be performed - manual review of the full conversation transcript is strongly recommended.",
+            "strengths": basic_strengths,
+            "weaknesses": [
+                "Automated detailed analysis was not available for this conversation",
+                "Comprehensive assessment requires manual transcript review"
+            ],
+            "overall_impression": "Manual review required. The conversation was completed but detailed AI-powered analysis encountered an error. Please review the full conversation transcript to properly assess this candidate's qualifications and fit for the position.",
         }
 
 
@@ -260,10 +278,34 @@ def _parse_llm_summary(response_text: str) -> Dict[str, Any]:
             # Add content to current section
             if current_section == 'summary' and not result["discussion_summary"]:
                 result["discussion_summary"] = line
-            elif current_section == 'strengths' and line.startswith('-'):
-                result["strengths"].append(line[1:].strip())
-            elif current_section == 'weaknesses' and line.startswith('-'):
-                result["weaknesses"].append(line[1:].strip())
+            elif current_section == 'strengths':
+                # Handle bullet points, numbered lists, or plain text
+                if line.startswith(('-', '•', '*')):
+                    result["strengths"].append(line[1:].strip())
+                elif line and line[0].isdigit() and ('. ' in line or ') ' in line):
+                    # Handle numbered lists like "1. " or "1) "
+                    strength = line.split('. ', 1)[-1].split(') ', 1)[-1].strip()
+                    if strength and len(strength) > 3:
+                        result["strengths"].append(strength)
+                elif not line.startswith(('(', '[')) and len(line) > 10:
+                    # Standalone text - might be a continuation or new item
+                    if result["strengths"] and not any(line.startswith(x) for x in ['-', '•', '*']):
+                        result["strengths"][-1] += " " + line
+                    else:
+                        result["strengths"].append(line)
+            elif current_section == 'weaknesses':
+                # Handle bullet points, numbered lists, or plain text
+                if line.startswith(('-', '•', '*')):
+                    result["weaknesses"].append(line[1:].strip())
+                elif line and line[0].isdigit() and ('. ' in line or ') ' in line):
+                    weakness = line.split('. ', 1)[-1].split(') ', 1)[-1].strip()
+                    if weakness and len(weakness) > 3:
+                        result["weaknesses"].append(weakness)
+                elif not line.startswith(('(', '[')) and len(line) > 10:
+                    if result["weaknesses"] and not any(line.startswith(x) for x in ['-', '•', '*']):
+                        result["weaknesses"][-1] += " " + line
+                    else:
+                        result["weaknesses"].append(line)
             elif current_section == 'impression' and not result["overall_impression"]:
                 result["overall_impression"] = line
             elif current_section == 'summary':
@@ -273,13 +315,20 @@ def _parse_llm_summary(response_text: str) -> Dict[str, Any]:
     
     # Ensure we have at least some default values
     if not result["discussion_summary"]:
-        result["discussion_summary"] = "Application conversation completed."
+        result["discussion_summary"] = "Candidate completed the application conversation. The discussion covered basic application questions and information gathering. Further detailed review of their responses is recommended to assess full qualifications and fit for the position."
     if not result["strengths"]:
-        result["strengths"] = ["Completed the application process"]
+        result["strengths"] = [
+            "Engaged with the application process",
+            "Responded to questions during the conversation",
+            "Completed the required information gathering"
+        ]
     if not result["weaknesses"]:
-        result["weaknesses"] = ["No significant weaknesses identified"]
+        result["weaknesses"] = [
+            "Limited detail provided in conversation responses",
+            "Unable to perform comprehensive analysis from available conversation data"
+        ]
     if not result["overall_impression"]:
-        result["overall_impression"] = "Review recommended."
+        result["overall_impression"] = "Manual review recommended to conduct more thorough assessment. Additional information may be needed to make a final hiring decision."
     
     return result
 
@@ -339,7 +388,6 @@ def _generate_pdf_from_data(application_data: Dict[str, Any]) -> bytes:
     # Session info
     elements.append(Paragraph(f"Session ID: {application_data.get('session_id', 'N/A')}", normal_style))
     elements.append(Paragraph(f"Generated: {application_data.get('timestamp', datetime.utcnow().isoformat())}", normal_style))
-    elements.append(Paragraph(f"Status: {application_data.get('status', 'N/A')}", normal_style))
     elements.append(Spacer(1, 12))
     
     # Applicant Information

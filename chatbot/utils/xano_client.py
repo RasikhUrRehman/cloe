@@ -38,8 +38,8 @@ class XanoClient:
         self.auth_token = None
         self.headers = {"Content-Type": "application/json"}
         
-        # Login to get auth token
-        self._login(email, password)
+        # # Login to get auth token
+        # self._login(email, password)
 
     def _login(self, email: str, password: str) -> bool:
         """
@@ -580,65 +580,104 @@ class XanoClient:
         self,
         name: str,
         email: Optional[str] = None,
-        phone: Optional[int] = None,
+        phone: Optional[str] = None,
         score: Optional[float] = None,
-        report_pdf: Optional[str] = None,
+        file_path: Optional[str] = None,
         job_id: Optional[str] = None,
         company_id: Optional[str] = None,
         status: str = "Short Listed",
-        user_id: Optional[int] = None,
         session_id: Optional[int] = None,
-        application: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
-        Create a new candidate in Xano
+        Create a new candidate in Xano using multipart/form-data API
         
         Args:
             name: Candidate name (required)
             email: Candidate email
-            phone: Candidate phone number
+            phone: Candidate phone number (as string)
             score: Fit score
-            report_pdf: PDF report path
+            file_path: Path to file (e.g., resume PDF) to upload
             job_id: Associated job ID
             company_id: Associated company ID
             status: Application status
-            user_id: User ID
             session_id: Session ID
-            application: Application file data
             
         Returns:
             Created candidate data if successful, None otherwise
         """
         try:
-            url = f"{XANO_CANDIDATE_API_URL}/candidate"
-            payload = {
-                "Name": name,
-                "Status": status,
+            # Handle case where a single dict is passed as the first parameter
+            # (legacy usage or convenience). Normalize keys to expected params.
+            if isinstance(name, dict):
+                payload = name
+                name = payload.get("name") or payload.get("Name")
+                email = payload.get("email") or payload.get("Email")
+                phone = payload.get("phone") or payload.get("Phone")
+                score = payload.get("score") or payload.get("Score")
+                file_path = payload.get("file_path") or payload.get("filePath") or payload.get("FilePath")
+                job_id = payload.get("job_id") or payload.get("jobId") or payload.get("jobID")
+                company_id = payload.get("company_id") or payload.get("companyId")
+                status = payload.get("status") or payload.get("Status") or status
+                session_id = payload.get("session_id") or payload.get("sessionId") or payload.get("session") or session_id
+
+            # Validate required param
+            if not name or not isinstance(name, (str,)):
+                logger.error("create_candidate: 'name' is required and must be a string")
+                return None
+            url = f"{XANO_CANDIDATE_API_URL}/candidate_new_api"
+            
+            # Build form data
+            form_data = {
+                'Name': (None, name),
+                'Status': (None, status),
+                'session_id': (None, str(session_id) if session_id else '0'),
             }
             
             # Add optional fields if provided
             if email:
-                payload["Email"] = email
-            if phone:
-                payload["Phone"] = phone
+                form_data['Email'] = (None, email)
+            if phone is not None:
+                # Only include Phone if it is purely numeric (or an int) to avoid Xano validation errors
+                try:
+                    phone_int = int(phone)
+                    form_data['Phone'] = (None, str(phone_int))
+                except Exception:
+                    logger.warning(f"Skipping non-integer phone for Xano candidate create: {phone}. Xano requires an integer value for Phone.")
             if score is not None:
-                payload["Score"] = score
-            if report_pdf:
-                payload["Report_pdf"] = report_pdf
+                form_data['Score'] = (None, str(int(score)))
             if job_id:
-                payload["job_id"] = job_id
+                form_data['job_id'] = (None, job_id)
             if company_id:
-                payload["company_id"] = company_id
-            if user_id:
-                payload["user_id"] = user_id
-            if session_id:
-                payload["session_id"] = session_id
-            if application:
-                payload["Application"] = application
+                form_data['company_id'] = (None, company_id)
+            
+            # Handle file upload if provided
+            files = None
+            if file_path:
+                import os
+                import mimetypes
+                if os.path.exists(file_path):
+                    file_name = os.path.basename(file_path)
+                    mime_type, _ = mimetypes.guess_type(file_path)
+                    mime_type = mime_type or 'application/octet-stream'
+                    files = {'File': (file_name, open(file_path, 'rb'), mime_type)}
+                else:
+                    logger.warning(f"File not found: {file_path}")
+            
+            # # Prepare headers without Content-Type (let requests set it for multipart)
+            # headers = {}
+            # if self.auth_token:
+            #     headers['Authorization'] = f'Bearer {self.auth_token}'
+            # headers['accept'] = 'application/json'
                 
             logger.info(f"Creating new candidate in Xano: {name}")
-            logger.debug(f"Candidate payload: {payload}")
-            response = self.session.post(url, headers=self.headers, json=payload, timeout=self.timeout)
+            logger.debug(f"Candidate form data: {form_data}")
+            
+            # Merge form_data and files for the request
+            response = self.session.post(
+                url, 
+                files={**form_data, **(files or {})},
+                timeout=self.timeout
+            )
             response.raise_for_status()
             result = response.json()
             logger.info(f"Successfully created candidate: {result.get('id', 'unknown')}")
@@ -651,6 +690,13 @@ class XanoClient:
         except Exception as e:
             logger.error(f"Unexpected error creating candidate: {e}")
             return None
+        finally:
+            # Close file handle if opened
+            if files and 'File' in files:
+                try:
+                    files['File'][1].close()
+                except:
+                    pass
 
     def get_candidate_by_id(self, candidate_id: int) -> Optional[Dict[str, Any]]:
         """

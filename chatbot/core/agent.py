@@ -47,7 +47,8 @@ class CleoRAGAgent:
         self.xano_client = get_xano_client()
         
         # Create toolkit for this agent (bound to session state, no globals)
-        self.toolkit = AgentToolkit(self.session_state, self.job_id)
+        # Pass a reference to the agent so the toolkit can access conversation memory
+        self.toolkit = AgentToolkit(self.session_state, self.job_id, agent=self)
         
         # Create Xano session and store session ID
         if not self.session_state.engagement:
@@ -772,30 +773,59 @@ class CleoRAGAgent:
             phone_match = re.search(phone_pattern, user_message)
             if phone_match:
                 app.phone_number = phone_match.group()
-                logger.info("Phone number captured")
+                logger.info(f"Phone number captured: {app.phone_number}")
                 state_changed = True
         # Name pattern (simple approach - look for "My name is" or similar)
         name_patterns = [
             r"my name is ([A-Za-z\s]{2,})",
             r"i'm ([A-Za-z\s]{2,})",
             r"i am ([A-Za-z\s]{2,})",
+            r"call me ([A-Za-z\s]{2,})",
+            r"this is ([A-Za-z\s]{2,})",
+        ]
+        false_positives = [
+            "interested", "looking", "good", "ready", "over", "older",
+            "above", "under", "authorized", "eighteen", "fine", "great",
+            "okay", "ok", "yes", "no", "here", "back", "done",
         ]
         if not app.full_name:
             for pattern in name_patterns:
                 name_match = re.search(pattern, user_message.lower())
                 if name_match:
-                    app.full_name = name_match.group(1).strip().title()
-                    logger.info(f"Name captured: {app.full_name}")
+                    name = name_match.group(1).strip().title()
+                    if len(name) >= 2 and not any(word in name.lower() for word in false_positives):
+                        app.full_name = name
+                        logger.info(f"Name captured: {app.full_name}")
+                        state_changed = True
+                        break
+        # Fallback: If message is short and looks like a name, treat as name
+        if not app.full_name:
+            words = user_message.strip().split()
+            if 1 <= len(words) <= 3 and all(w.isalpha() for w in words):
+                # Avoid common non-names
+                false_positives = [
+                    "hi", "hello", "thanks", "thank", "bye", "goodbye", "ok", "okay", "yes", "no", "sure", "please", "help", "info", "information", "wrap", "up", "done", "finish", "end", "stop"
+                ]
+                if not any(w.lower() in false_positives for w in words):
+                    app.full_name = user_message.strip().title()
+                    state_changed = True
+                    logger.info(f"Fallback captured name: {app.full_name}")
+
+        # Experience patterns (more flexible)
+        exp_patterns = [
+            r"(\d+(?:\.\d+)?)\s*years?",  # e.g. 5 years, 2.5 years
+            r"worked\s*(?:for\s*)?(\d+(?:\.\d+)?)\s*years?",
+            r"experience\s*(?:of|:)\s*(\d+(?:\.\d+)?)",
+            r"(\d+(?:\.\d+)?)\s*yrs?",
+        ]
+        if app.years_experience is None:
+            for pattern in exp_patterns:
+                exp_match = re.search(pattern, user_message.lower())
+                if exp_match:
+                    app.years_experience = float(exp_match.group(1))
+                    logger.info(f"Years of experience captured: {app.years_experience}")
                     state_changed = True
                     break
-        # Years of experience
-        exp_pattern = r"(\d+(?:\.\d+)?)\s*years?\s*(?:of\s*)?(?:experience|exp)"
-        if not app.years_experience:
-            exp_match = re.search(exp_pattern, user_message.lower())
-            if exp_match:
-                app.years_experience = float(exp_match.group(1))
-                logger.info(f"Years of experience captured: {app.years_experience}")
-                state_changed = True
         return state_changed
     def _is_application_complete(self, app: ApplicationState) -> bool:
         """Check if application stage is complete"""
@@ -909,9 +939,7 @@ class CleoRAGAgent:
             if email_match:
                 app.email = email_match.group()
                 state_changed = True
-                logger.info("Proactively captured email")
-                # Update candidate with email in Xano using toolkit method
-                self.toolkit.update_candidate(f"email: {app.email}")
+                logger.info(f"Proactively captured email: {app.email}")
         # Phone pattern
         phone_pattern = (
             r"(\+?1?[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})"
@@ -921,72 +949,67 @@ class CleoRAGAgent:
             if phone_match:
                 app.phone_number = phone_match.group()
                 state_changed = True
-                logger.info("Proactively captured phone number")
-                # Update candidate with phone in Xano using toolkit method
-                self.toolkit.update_candidate(f"phone: {app.phone_number}")
-        # Name pattern
+                logger.info(f"Proactively captured phone number: {app.phone_number}")
+        # Name pattern - capture names from common phrases
         name_patterns = [
             r"my name is ([A-Za-z\s]+)",
             r"i'm ([A-Za-z\s]+)",
             r"i am ([A-Za-z\s]+)",
             r"call me ([A-Za-z\s]+)",
+            r"this is ([A-Za-z\s]+)",
+            r"it's ([A-Za-z\s]+)",
+        ]
+        false_positives = [
+            "interested", "looking", "good", "ready", "over", "older",
+            "above", "under", "authorized", "eighteen", "fine", "great",
+            "okay", "ok", "yes", "no", "here", "back", "done",
         ]
         if not app.full_name:
             for pattern in name_patterns:
                 name_match = re.search(pattern, user_lower)
                 if name_match:
                     name = name_match.group(1).strip().title()
-                    # Avoid capturing common words as names
-                    false_positives = [
-                        "interested",
-                        "looking",
-                        "good",
-                        "ready",
-                        "over",
-                        "older",
-                        "above",
-                        "under",
-                        "authorized",
-                        "eighteen",
-                    ]
-                    if (
-                        len(name) > 1
-                        and not any(word in name.lower() for word in false_positives)
-                        and len(name.split()) >= 2
-                    ):  # Require at least first and last name
+                    if len(name) >= 2 and not any(word in name.lower() for word in false_positives):
                         app.full_name = name
-                        state_changed = True
                         logger.info(f"Proactively captured name: {name}")
-                        # Auto-create candidate in Xano when name is captured using toolkit method
-                        self.toolkit.create_candidate(name)
+                        state_changed = True
                         break
-        # Years of experience
+        # Fallback: If message is short and looks like a name, treat as name
+        if not app.full_name:
+            words = user_message.strip().split()
+            if 1 <= len(words) <= 3 and all(w.isalpha() for w in words):
+                # Avoid common non-names
+                false_positives = [
+                    "hi", "hello", "thanks", "thank", "bye", "goodbye", "ok", "okay", "yes", "no", "sure", "please", "help", "info", "information", "wrap", "up", "done", "finish", "end", "stop"
+                ]
+                if not any(w.lower() in false_positives for w in words):
+                    app.full_name = user_message.strip().title()
+                    state_changed = True
+                    logger.info(f"Fallback captured name: {app.full_name}")
+
+        # Experience patterns (more flexible)
         exp_patterns = [
-            r"(\d+(?:\.\d+)?)\s*years?\s*(?:of\s*)?(?:experience|exp)",
-            r"(\d+)\s*(?:year|yr)s?\s*experience",
-            r"worked?\s*(?:for\s*)?(\d+)\s*years?",
+            r"(\d+(?:\.\d+)?)\s*years?",  # e.g. 5 years, 2.5 years
+            r"worked\s*(?:for\s*)?(\d+(?:\.\d+)?)\s*years?",
+            r"experience\s*(?:of|:)\s*(\d+(?:\.\d+)?)",
+            r"(\d+(?:\.\d+)?)\s*yrs?",
         ]
         if app.years_experience is None:
             for pattern in exp_patterns:
-                exp_match = re.search(pattern, user_lower)
+                exp_match = re.search(pattern, user_message.lower())
                 if exp_match:
-                    years = float(exp_match.group(1))
-                    if 0 <= years <= 50:  # Reasonable range
-                        app.years_experience = years
-                        state_changed = True
-                        logger.info(f"Proactively captured experience: {years} years")
-                        break
+                    app.years_experience = float(exp_match.group(1))
+                    logger.info(f"Years of experience captured: {app.years_experience}")
+                    state_changed = True
+                    break
         # Log state changes
         if state_changed:
             logger.info("Proactive information extraction completed")
         return state_changed
     def _calculate_and_save_fit_score(self):
-        """Calculate fit score when application is complete"""
+        """Calculate fit score when application is complete, but DO NOT generate report or candidate here."""
         try:
             from chatbot.utils.fit_score import FitScoreCalculator
-            from chatbot.utils.report_generator import ReportGenerator
-            import json
-            import os
             # Get chat history for personality analysis
             chat_history = []
             if self.memory and hasattr(self.memory, 'chat_memory'):
@@ -995,88 +1018,20 @@ class CleoRAGAgent:
                         "role": "human" if message.type == "human" else "ai",
                         "content": message.content,
                     })
-            # Pass LLM for personality analysis
             calculator = FitScoreCalculator(llm=self.llm)
-            # Calculate fit score with personality analysis
             fit_score = calculator.calculate_fit_score(
                 qualification=self.session_state.qualification,
                 application=self.session_state.application,
                 chat_history=chat_history,
                 verification=self.session_state.verification,
             )
-            logger.info(f"Fit score calculated: {fit_score.total_score:.2f}/100")
-            
-            # Prepare application data for Xano (moved up to use in report generation)
-            application_data = {
-                "session_id": self.session_state.session_id,
-                "timestamp": get_current_timestamp(),
-                "job": self.session_state.engagement.job_details if self.session_state.engagement else None,
-                "engagement": self.session_state.engagement.model_dump() if self.session_state.engagement else {},
-                "applicant": {
-                    "name": self.session_state.application.full_name,
-                    "phone": self.session_state.application.phone_number,
-                    "email": self.session_state.application.email,
-                    "address": self.session_state.application.address,
-                },
-                "qualification": self.session_state.qualification.model_dump() if self.session_state.qualification else None,
-                "application": self.session_state.application.model_dump() if self.session_state.application else None,
-                "verification": self.session_state.verification.model_dump() if self.session_state.verification else None,
-                "fit_score": {
-                    "total_score": fit_score.total_score,
-                    "qualification_score": fit_score.qualification_score,
-                    "experience_score": fit_score.experience_score,
-                    "personality_score": fit_score.personality_score,
-                    "rating": calculator.get_fit_rating(fit_score.total_score),
-                    "breakdown": fit_score.breakdown,
-                },
-                "status": "completed",
-            }
-            
-            # Try to generate report with prepared app_data (but don't fail if it errors)
-            reports = None
+            logger.info(f"Fit score calculated: {fit_score.total_score:.2f}/100 (deferred report/candidate creation)")
+            # Store fit score in memory for later use
             try:
-                report_gen = ReportGenerator(xano_client=self.xano_client)
-                reports = report_gen.generate_report(
-                    session_id=self.session_state.session_id, 
-                    include_fit_score=True,
-                    app_data=application_data
-                )
-                logger.info(f"Reports generated: {reports}")
-            except Exception as report_error:
-                logger.warning(f"Could not generate reports: {report_error}")
-                # Continue without report generation
-            
-            # Update Xano session with application data and fit score
-            if self.session_state.engagement and self.session_state.engagement.xano_session_id:
-                xano_session_id = self.session_state.engagement.xano_session_id
-                update_payload = {
-                    "status": "Completed",
-                    "fit_score": fit_score.total_score,
-                    "application_data": json.dumps(application_data, default=str)
-                }
-                self.xano_client.update_session(xano_session_id, update_payload)
-                logger.info(f"Application data saved to Xano session {xano_session_id}")
-            
-            # Update candidate score in Xano
-            if self.session_state.engagement and self.session_state.engagement.candidate_id:
-                candidate_id = self.session_state.engagement.candidate_id
-                candidate_update = {
-                    "Score": fit_score.total_score,
-                    "Status": calculator.get_fit_rating(fit_score.total_score)
-                }
-                # Add email and phone if available
-                if self.session_state.application:
-                    if self.session_state.application.email:
-                        candidate_update["Email"] = self.session_state.application.email
-                    if self.session_state.application.phone_number:
-                        phone_clean = ''.join(filter(str.isdigit, self.session_state.application.phone_number))
-                        if phone_clean:
-                            candidate_update["Phone"] = int(phone_clean)
-                
-                self.xano_client.update_candidate(candidate_id, candidate_update)
-                logger.info(f"Candidate {candidate_id} updated with fit score {fit_score.total_score}")
-            
-            logger.info(f"Application completed and synced to Xano")
+                if self.session_state.engagement:
+                    setattr(self.session_state.engagement, 'last_fit_score', fit_score.total_score)
+            except Exception:
+                logger.debug("Could not attach last_fit_score to session_state.engagement; skipping")
         except Exception as e:
             logger.error(f"Error calculating fit score: {e}")
             import traceback
