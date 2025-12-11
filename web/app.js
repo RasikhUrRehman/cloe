@@ -569,7 +569,7 @@ async function handleSendMessage(e) {
     } catch (error) {
         console.error('Error sending message:', error);
         hideTypingIndicator();
-        addMessage('Sorry, I encountered an error. Please try again.', false);
+        
     } finally {
         setInputEnabled(true);
         messageInput.focus();
