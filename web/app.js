@@ -129,7 +129,7 @@ function updateSessionStatus(status) {
     updateProgressItem(engagementProgress, status.engagement_complete);
     updateProgressItem(qualificationProgress, status.qualification_complete);
     updateProgressItem(applicationProgress, status.application_complete);
-    updateProgressItem(verificationProgress, status.verification_complete);
+    updateProgressItem(verificationProgress, status.verification_complete || status.ready_for_verification);
 }
 
 function updateProgressItem(element, completed) {
@@ -326,7 +326,7 @@ async function createSession() {
             payload.job_id = selectedJobId;
         }
         
-        const response = await fetch(`${API_BASE_URL}/api/v1/session/create`, {
+        const response = await fetch(`${API_BASE_URL}/api/v1/sessions/create`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -373,7 +373,7 @@ async function sendMessage(message) {
 
 async function getSessionStatus() {
     try {
-        const response = await fetch(`${API_BASE_URL}/api/v1/session/${sessionId}/status`);
+        const response = await fetch(`${API_BASE_URL}/api/v1/sessions/${sessionId}/status`);
         
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
@@ -389,7 +389,7 @@ async function getSessionStatus() {
 
 async function resetSession() {
     try {
-        const response = await fetch(`${API_BASE_URL}/api/v1/session/${sessionId}/reset`, {
+        const response = await fetch(`${API_BASE_URL}/api/v1/sessions/${sessionId}/reset`, {
             method: 'POST'
         });
         
@@ -451,16 +451,13 @@ async function handleStartConversation() {
             throw new Error('API is not available. Please make sure the backend is running.');
         }
         
-        // Create Xano session (optional, backend will also create one)
-        // We create it here to get the ID early for frontend tracking
-        xanoSessionId = await createXanoSession();
-        
-        // Create session (with job_id if selected)
+        // Create session via backend (backend will create Xano session)
         const sessionData = await createSession();
-        sessionId = sessionData.session_id;
+        sessionId = sessionData.session_id;  // Internal UUID for API calls
+        xanoSessionId = sessionData.xano_session_id;  // Xano session ID
         
-        // Update UI
-        sessionIdDisplay.textContent = sessionId;
+        // Update UI - show Xano session ID as the primary identifier
+        sessionIdDisplay.textContent = xanoSessionId || sessionId;
         
         // Show job info in sidebar if a job was selected
         if (selectedJobDetails) {
@@ -510,12 +507,7 @@ async function handleSendMessage(e) {
     // Add user message to chat
     addMessage(message, true);
     
-    // Post user message to Xano (non-blocking)
-    if (xanoSessionId) {
-        postMessageToXano(xanoSessionId, message, 'User').catch(err => {
-            console.warn('Failed to post user message to Xano:', err);
-        });
-    }
+    // Note: Messages are posted to Xano by the backend API, not here (to avoid duplicates)
     
     // Clear input
     messageInput.value = '';
@@ -525,7 +517,7 @@ async function handleSendMessage(e) {
     showTypingIndicator();
     
     try {
-        // Send message to API
+        // Send message to API (backend will post to Xano)
         const response = await sendMessage(message);
         
         // Hide typing indicator before adding messages
@@ -533,9 +525,6 @@ async function handleSendMessage(e) {
         
         // Add assistant response(s) - handle multiple messages
         if (response.responses && Array.isArray(response.responses)) {
-            // Combine responses for Xano
-            const combinedResponse = response.responses.join('\n\n');
-            
             // Add multiple messages with slight delays for natural flow
             for (let i = 0; i < response.responses.length; i++) {
                 // Show typing indicator before each message (except the first)
@@ -553,13 +542,8 @@ async function handleSendMessage(e) {
                 }
             }
             
-            // Post AI response to Xano (non-blocking)
+            // Update session status based on current stage (status update only, no message posting)
             if (xanoSessionId) {
-                postMessageToXano(xanoSessionId, combinedResponse, 'AI').catch(err => {
-                    console.warn('Failed to post AI message to Xano:', err);
-                });
-                
-                // Update session status based on current stage
                 const statusMap = {
                     'engagement': 'Continue',
                     'qualification': 'Continue',
@@ -576,13 +560,6 @@ async function handleSendMessage(e) {
             // Fallback for backward compatibility (if API returns single response)
             const messageText = response.response || response.responses[0] || "I'm sorry, I didn't get that.";
             addMessage(messageText, false, response.timestamp);
-            
-            // Post AI response to Xano (non-blocking)
-            if (xanoSessionId) {
-                postMessageToXano(xanoSessionId, messageText, 'AI').catch(err => {
-                    console.warn('Failed to post AI message to Xano:', err);
-                });
-            }
         }
         
         // Update session status
@@ -651,24 +628,13 @@ async function handleResetSession() {
 }
 
 function startStatusUpdates() {
-    // Initial status check
+    // Initial health check only - no periodic polling to reduce log noise
     checkHealth();
-    
-    // Update status periodically
-    statusUpdateTimer = setInterval(async () => {
-        try {
-            await checkHealth();
-            if (sessionId) {
-                const status = await getSessionStatus();
-                updateSessionStatus(status);
-            }
-        } catch (error) {
-            console.error('Error updating status:', error);
-        }
-    }, STATUS_UPDATE_INTERVAL);
+    // Status updates are now event-driven (only when messages are sent/received)
 }
 
 function stopStatusUpdates() {
+    // No longer using interval timer - status updates are event-driven
     if (statusUpdateTimer) {
         clearInterval(statusUpdateTimer);
         statusUpdateTimer = null;

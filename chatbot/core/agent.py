@@ -6,7 +6,6 @@ from typing import Any, Dict, List
 from langchain.agents import AgentExecutor, create_openai_functions_agent
 from langchain.memory import ConversationBufferMemory
 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain.tools import Tool
 from langchain_openai import ChatOpenAI
 # LangFuse imports
 try:
@@ -15,6 +14,7 @@ try:
 except ImportError:
     LANGFUSE_AVAILABLE = False
 # from chatbot.core.retrievers import RetrievalMethod
+from chatbot.core.tools import create_agent_tools, AgentToolkit
 from chatbot.prompts.prompts import CleoPrompts
 from chatbot.state.states import (
     ApplicationState,
@@ -34,14 +34,20 @@ class CleoRAGAgent:
     def __init__(
         self,
         session_state: SessionState = None,
+        job_id: str = None,
     ):
         """
         Initialize Cleo RAG Agent
         Args:
             session_state: Current session state (creates new if None)
+            job_id: Job ID for the position being applied to
         """
         self.session_state = session_state or SessionState()
+        self.job_id = job_id  # Store job_id for candidate creation
         self.xano_client = get_xano_client()
+        
+        # Create toolkit for this agent (bound to session state, no globals)
+        self.toolkit = AgentToolkit(self.session_state, self.job_id)
         
         # Create Xano session and store session ID
         if not self.session_state.engagement:
@@ -91,25 +97,19 @@ class CleoRAGAgent:
         self.memory = ConversationBufferMemory(
             memory_key="chat_history", return_messages=True
         )
-        # Create tools and agent
-        self.tools = self._create_tools()
-        self.agent = self._create_agent()
-    def _create_tools(self) -> List[Tool]:
-        """Create tools for the agent"""
-        tools = []
-        # Save State Tool
-        def save_current_state(_: str) -> str:
-            """Save the current conversation state"""
-            # State is managed via Xano and LangChain memory
-            return f"State tracked in memory for session {self.session_state.session_id}"
-        tools.append(
-            Tool(
-                name="save_state",
-                func=save_current_state,
-                description="Save the current conversation state to persistent storage",
+        
+        # Add job_id to memory context if provided
+        if self.job_id:
+            from langchain.schema import SystemMessage
+            self.memory.chat_memory.add_message(
+                SystemMessage(content=f"IMPORTANT CONTEXT: This session is for job_id: {self.job_id}. When creating a candidate, this job_id MUST be associated with the candidate record.")
             )
-        )
-        return tools
+            logger.info(f"Added job_id {self.job_id} to agent memory")
+        
+        # Get tools from the toolkit (bound to this agent's session state)
+        self.tools = self.toolkit.get_tools()
+        self.agent = self._create_agent()
+
     def _create_agent(self) -> AgentExecutor:
         """Create the LangChain agent"""
         # Get system prompt based on current stage using CleoPrompts
@@ -185,6 +185,81 @@ class CleoRAGAgent:
             logger.info(f"Updated Xano session {xano_session_id} to status: {status}")
         else:
             logger.warning(f"Failed to update Xano session {xano_session_id} status")
+    
+    def sync_session_state_to_xano(self):
+        """
+        Synchronize the current session state to Xano.
+        This ensures Xano always has the most up-to-date status.
+        Call this after any state changes to keep Xano in sync.
+        """
+        if not self.session_state.engagement or not self.session_state.engagement.xano_session_id:
+            logger.warning("Cannot sync to Xano: No Xano session ID found")
+            return False
+        
+        xano_session_id = self.session_state.engagement.xano_session_id
+        current_stage = self.session_state.current_stage
+        
+        # Map conversation stages to Xano status values
+        stage_to_status = {
+            ConversationStage.ENGAGEMENT: "Started",
+            ConversationStage.QUALIFICATION: "Continue",
+            ConversationStage.APPLICATION: "Continue",
+            ConversationStage.VERIFICATION: "Pending",
+            ConversationStage.COMPLETED: "Completed",
+        }
+        
+        status = stage_to_status.get(current_stage, "Continue")
+        
+        # Prepare update data with both status and stage information
+        update_data = {
+            "Status": status,
+            "conversation_stage": current_stage.value,  # Store the actual stage name
+        }
+        
+        # Add candidate_id if available
+        if self.session_state.engagement.candidate_id:
+            update_data["candidate_id"] = self.session_state.engagement.candidate_id
+        
+        result = self.xano_client.update_session(xano_session_id, update_data)
+        if result:
+            logger.info(f"Synced session state to Xano: session={xano_session_id}, status={status}, stage={current_stage.value}")
+            return True
+        else:
+            logger.warning(f"Failed to sync session state to Xano for session {xano_session_id}")
+            return False
+    
+    def get_xano_session_status(self) -> dict:
+        """
+        Get the current session status from Xano.
+        Returns a dict with status, stage, and other session info.
+        """
+        if not self.session_state.engagement or not self.session_state.engagement.xano_session_id:
+            return {
+                "status": "Unknown",
+                "conversation_stage": self.session_state.current_stage.value,
+                "synced": False,
+                "error": "No Xano session ID"
+            }
+        
+        xano_session_id = self.session_state.engagement.xano_session_id
+        xano_session = self.xano_client.get_session_by_id(xano_session_id)
+        
+        if xano_session:
+            return {
+                "xano_session_id": xano_session_id,
+                "status": xano_session.get("Status", "Unknown"),
+                "conversation_stage": xano_session.get("conversation_stage", self.session_state.current_stage.value),
+                "candidate_id": xano_session.get("candidate_id"),
+                "synced": True,
+                "local_stage": self.session_state.current_stage.value,
+            }
+        else:
+            return {
+                "status": "Unknown",
+                "conversation_stage": self.session_state.current_stage.value,
+                "synced": False,
+                "error": "Failed to fetch from Xano"
+            }
     def process_message(self, user_message: str) -> List[str]:
         """
         Process user message and generate response(s) with retry logic
@@ -316,6 +391,8 @@ class CleoRAGAgent:
             self.session_state.engagement.stage_completed = True
             self.session_state.current_stage = ConversationStage.QUALIFICATION
             self._update_xano_status(ConversationStage.QUALIFICATION)
+            # Sync the full state to Xano for real-time alignment
+            self.sync_session_state_to_xano()
             logger.info("Quick transition to QUALIFICATION based on consent")
     def _enhance_input_with_context(self, user_message: str) -> str:
         """
@@ -653,11 +730,13 @@ class CleoRAGAgent:
                 )
             # Handle verification completion
             # This would be triggered by actual verification processes
-        # Log state changes
+        # Log state changes and sync to Xano
         if state_changed:
             logger.info(
                 f"State updated for session {self.session_state.session_id}"
             )
+            # Sync the updated state to Xano to keep it in real-time alignment
+            self.sync_session_state_to_xano()
     def _is_qualification_complete(self, qual: QualificationState) -> bool:
         """Check if qualification stage is complete"""
         return all(
@@ -831,6 +910,8 @@ class CleoRAGAgent:
                 app.email = email_match.group()
                 state_changed = True
                 logger.info("Proactively captured email")
+                # Update candidate with email in Xano using toolkit method
+                self.toolkit.update_candidate(f"email: {app.email}")
         # Phone pattern
         phone_pattern = (
             r"(\+?1?[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})"
@@ -841,6 +922,8 @@ class CleoRAGAgent:
                 app.phone_number = phone_match.group()
                 state_changed = True
                 logger.info("Proactively captured phone number")
+                # Update candidate with phone in Xano using toolkit method
+                self.toolkit.update_candidate(f"phone: {app.phone_number}")
         # Name pattern
         name_patterns = [
             r"my name is ([A-Za-z\s]+)",
@@ -874,6 +957,8 @@ class CleoRAGAgent:
                         app.full_name = name
                         state_changed = True
                         logger.info(f"Proactively captured name: {name}")
+                        # Auto-create candidate in Xano when name is captured using toolkit method
+                        self.toolkit.create_candidate(name)
                         break
         # Years of experience
         exp_patterns = [
@@ -920,22 +1005,13 @@ class CleoRAGAgent:
                 verification=self.session_state.verification,
             )
             logger.info(f"Fit score calculated: {fit_score.total_score:.2f}/100")
-            # Try to generate report (but don't fail if it errors)
-            reports = None
-            try:
-                report_gen = ReportGenerator()
-                reports = report_gen.generate_report(
-                    session_id=self.session_state.session_id, include_fit_score=True
-                )
-                logger.info(f"Reports generated: {reports}")
-            except Exception as report_error:
-                logger.warning(f"Could not generate reports: {report_error}")
-                # Continue to save application JSON even if reports fail
-            # Save application as JSON file
+            
+            # Prepare application data for Xano (moved up to use in report generation)
             application_data = {
                 "session_id": self.session_state.session_id,
                 "timestamp": get_current_timestamp(),
                 "job": self.session_state.engagement.job_details if self.session_state.engagement else None,
+                "engagement": self.session_state.engagement.model_dump() if self.session_state.engagement else {},
                 "applicant": {
                     "name": self.session_state.application.full_name,
                     "phone": self.session_state.application.phone_number,
@@ -955,13 +1031,52 @@ class CleoRAGAgent:
                 },
                 "status": "completed",
             }
-            # Save to JSON file
-            applications_dir = "./applications"
-            os.makedirs(applications_dir, exist_ok=True)
-            application_file = os.path.join(applications_dir, f"application_{self.session_state.session_id}.json")
-            with open(application_file, 'w') as f:
-                json.dump(application_data, f, indent=2, default=str)
-            logger.info(f"Application saved to: {application_file}")
+            
+            # Try to generate report with prepared app_data (but don't fail if it errors)
+            reports = None
+            try:
+                report_gen = ReportGenerator(xano_client=self.xano_client)
+                reports = report_gen.generate_report(
+                    session_id=self.session_state.session_id, 
+                    include_fit_score=True,
+                    app_data=application_data
+                )
+                logger.info(f"Reports generated: {reports}")
+            except Exception as report_error:
+                logger.warning(f"Could not generate reports: {report_error}")
+                # Continue without report generation
+            
+            # Update Xano session with application data and fit score
+            if self.session_state.engagement and self.session_state.engagement.xano_session_id:
+                xano_session_id = self.session_state.engagement.xano_session_id
+                update_payload = {
+                    "status": "Completed",
+                    "fit_score": fit_score.total_score,
+                    "application_data": json.dumps(application_data, default=str)
+                }
+                self.xano_client.update_session(xano_session_id, update_payload)
+                logger.info(f"Application data saved to Xano session {xano_session_id}")
+            
+            # Update candidate score in Xano
+            if self.session_state.engagement and self.session_state.engagement.candidate_id:
+                candidate_id = self.session_state.engagement.candidate_id
+                candidate_update = {
+                    "Score": fit_score.total_score,
+                    "Status": calculator.get_fit_rating(fit_score.total_score)
+                }
+                # Add email and phone if available
+                if self.session_state.application:
+                    if self.session_state.application.email:
+                        candidate_update["Email"] = self.session_state.application.email
+                    if self.session_state.application.phone_number:
+                        phone_clean = ''.join(filter(str.isdigit, self.session_state.application.phone_number))
+                        if phone_clean:
+                            candidate_update["Phone"] = int(phone_clean)
+                
+                self.xano_client.update_candidate(candidate_id, candidate_update)
+                logger.info(f"Candidate {candidate_id} updated with fit score {fit_score.total_score}")
+            
+            logger.info(f"Application completed and synced to Xano")
         except Exception as e:
             logger.error(f"Error calculating fit score: {e}")
             import traceback
