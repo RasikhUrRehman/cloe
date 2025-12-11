@@ -162,6 +162,8 @@ async def get_session_status(session_id: str):
     """
     Get the current status of a session.
     Returns 404 if the session does not exist.
+    Note: This endpoint no longer syncs to Xano on every call to reduce log noise.
+    Xano sync happens only on state changes (via process_message).
     """
     try:
         session_manager = get_session_manager()
@@ -172,8 +174,8 @@ async def get_session_status(session_id: str):
         agent = session_manager.get_session(session_id)
         summary = agent.get_conversation_summary()
         
-        # Sync the current state to Xano to ensure it's up to date
-        agent.sync_session_state_to_xano()
+        # Note: Removed sync_session_state_to_xano() call here
+        # Xano sync now happens only on actual state changes in process_message
         
         # Get verification_complete from agent state
         verification_complete = False

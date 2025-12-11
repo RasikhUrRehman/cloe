@@ -32,6 +32,7 @@ class AgentToolkit:
         self.session_state = session_state
         self.job_id = job_id
         self.xano_client = get_xano_client()
+        self._session_concluded = False  # Track if session has been concluded
         logger.info(f"AgentToolkit initialized for session {session_state.session_id}, job_id: {job_id}")
     
     def save_state(self, milestone: str) -> str:
@@ -43,6 +44,69 @@ class AgentToolkit:
         """
         logger.info(f"State milestone saved: {milestone} for session {self.session_state.session_id}")
         return f"State tracked in memory for session {self.session_state.session_id}: {milestone}"
+    
+    def conclude_session(self, reason: str) -> str:
+        """
+        Conclude the current session when the user indicates they want to end the conversation.
+        This properly closes the session, updates the status in Xano, and saves any collected data.
+        
+        Args:
+            reason: The reason for concluding the session (e.g., "User said goodbye", "User needs time to decide")
+        """
+        try:
+            if self._session_concluded:
+                return "Session has already been concluded."
+            
+            self._session_concluded = True
+            xano_session_id = None
+            
+            if self.session_state.engagement:
+                xano_session_id = self.session_state.engagement.xano_session_id
+            
+            # Determine final status based on what was collected
+            final_status = "Ended"
+            if self.session_state.application and self.session_state.application.stage_completed:
+                final_status = "Completed"
+            elif self.session_state.qualification and self.session_state.qualification.stage_completed:
+                final_status = "Qualified - Pending"
+            elif self.session_state.engagement and self.session_state.engagement.consent_given:
+                final_status = "In Progress - Paused"
+            else:
+                final_status = "Ended - Early Exit"
+            
+            # Update session in Xano
+            if xano_session_id:
+                update_data = {
+                    "Status": final_status,
+                    "conversation_stage": "concluded",
+                    "conclusion_reason": reason,
+                }
+                
+                # Add candidate_id if available
+                if self.session_state.engagement and self.session_state.engagement.candidate_id:
+                    update_data["candidate_id"] = self.session_state.engagement.candidate_id
+                
+                self.xano_client.update_session(xano_session_id, update_data)
+                logger.info(f"Session {xano_session_id} concluded with status: {final_status}, reason: {reason}")
+            
+            # If we have candidate info but no candidate was created, create one now
+            if self.session_state.application and self.session_state.application.full_name:
+                if not (self.session_state.engagement and self.session_state.engagement.candidate_id):
+                    self.create_candidate(self.session_state.application.full_name)
+            
+            # Update candidate status if exists
+            if self.session_state.engagement and self.session_state.engagement.candidate_id:
+                candidate_status = "Application Paused" if final_status != "Completed" else "Application Complete"
+                self.xano_client.update_candidate(
+                    self.session_state.engagement.candidate_id,
+                    {"Status": candidate_status}
+                )
+            
+            return f"Session concluded successfully. Status: {final_status}. Reason: {reason}"
+            
+        except Exception as e:
+            logger.error(f"Error concluding session: {e}")
+            return f"Session ended with note: {reason}"
     
     def create_candidate(self, name: str) -> str:
         """
@@ -183,6 +247,11 @@ class AgentToolkit:
                 func=self.update_candidate,
                 name="update_candidate",
                 description="Update the candidate record with new information like email, phone, or score. Input should be a string describing what to update, e.g., 'email: john@example.com' or 'phone: 1234567890' or 'status: Qualified'",
+            ),
+            StructuredTool.from_function(
+                func=self.conclude_session,
+                name="conclude_session",
+                description="Use this tool when the user indicates they want to end the conversation (e.g., says goodbye, thanks and leaves, needs to go, will think about it). This properly saves any collected data and marks the session as ended. Input should be the reason for ending (e.g., 'User said goodbye', 'User needs time to decide', 'User completed application'). IMPORTANT: Always call this when the user is leaving!",
             ),
         ]
         return tools

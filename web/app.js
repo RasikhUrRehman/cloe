@@ -628,24 +628,13 @@ async function handleResetSession() {
 }
 
 function startStatusUpdates() {
-    // Initial status check
+    // Initial health check only - no periodic polling to reduce log noise
     checkHealth();
-    
-    // Update status periodically
-    statusUpdateTimer = setInterval(async () => {
-        try {
-            await checkHealth();
-            if (sessionId) {
-                const status = await getSessionStatus();
-                updateSessionStatus(status);
-            }
-        } catch (error) {
-            console.error('Error updating status:', error);
-        }
-    }, STATUS_UPDATE_INTERVAL);
+    // Status updates are now event-driven (only when messages are sent/received)
 }
 
 function stopStatusUpdates() {
+    // No longer using interval timer - status updates are event-driven
     if (statusUpdateTimer) {
         clearInterval(statusUpdateTimer);
         statusUpdateTimer = null;
