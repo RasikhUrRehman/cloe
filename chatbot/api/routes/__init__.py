@@ -1,0 +1,16 @@
+"""
+API Routes Package
+Contains modular route definitions for the Cleo RAG Agent API
+"""
+
+from chatbot.api.routes.chat import router as chat_router
+from chatbot.api.routes.sessions import router as sessions_router
+from chatbot.api.routes.applications import router as applications_router
+from chatbot.api.routes.questions import router as questions_router
+
+__all__ = [
+    "chat_router",
+    "sessions_router",
+    "applications_router",
+    "questions_router",
+]
