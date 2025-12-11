@@ -576,101 +576,101 @@ async def get_application_pdf(session_id: int):
         raise HTTPException(status_code=500, detail=f"Failed to generate PDF: {str(e)}")
 
 
-@router.get("", response_model=List[ApplicationSummary])
-async def list_applications(session_ids: Optional[str] = None, limit: int = 100, offset: int = 0):
-    """
-    List applications by fetching each session by ID from Xano
+# @router.get("", response_model=List[ApplicationSummary])
+# async def list_applications(session_ids: Optional[str] = None, limit: int = 100, offset: int = 0):
+#     """
+#     List applications by fetching each session by ID from Xano
     
-    Args:
-        session_ids: Comma-separated list of Xano session IDs to fetch (e.g., "1,2,3")
-        limit: Maximum number of applications to return
-        offset: Number of applications to skip
-    """
-    try:
-        xano_client = get_xano_client()
-        applications = []
+#     Args:
+#         session_ids: Comma-separated list of Xano session IDs to fetch (e.g., "1,2,3")
+#         limit: Maximum number of applications to return
+#         offset: Number of applications to skip
+#     """
+#     try:
+#         xano_client = get_xano_client()
+#         applications = []
         
-        if session_ids:
-            # Parse session IDs from comma-separated string
-            try:
-                ids = [int(sid.strip()) for sid in session_ids.split(",") if sid.strip()]
-            except ValueError:
-                raise HTTPException(status_code=400, detail="Invalid session_ids format. Use comma-separated integers.")
+#         if session_ids:
+#             # Parse session IDs from comma-separated string
+#             try:
+#                 ids = [int(sid.strip()) for sid in session_ids.split(",") if sid.strip()]
+#             except ValueError:
+#                 raise HTTPException(status_code=400, detail="Invalid session_ids format. Use comma-separated integers.")
             
-            # Fetch each session by ID
-            for sid in ids[offset:offset + limit]:
-                session = xano_client.get_session_by_id(sid)
-                if session:
-                    app_summary = _build_application_summary(session, xano_client)
-                    applications.append(app_summary)
-        else:
-            # Get all sessions if no specific IDs provided
-            sessions = xano_client.get_sessions() or []
-            for session in sessions[offset:offset + limit]:
-                app_summary = _build_application_summary(session, xano_client)
-                applications.append(app_summary)
+#             # Fetch each session by ID
+#             for sid in ids[offset:offset + limit]:
+#                 session = xano_client.get_session_by_id(sid)
+#                 if session:
+#                     app_summary = _build_application_summary(session, xano_client)
+#                     applications.append(app_summary)
+#         else:
+#             # Get all sessions if no specific IDs provided
+#             sessions = xano_client.get_sessions() or []
+#             for session in sessions[offset:offset + limit]:
+#                 app_summary = _build_application_summary(session, xano_client)
+#                 applications.append(app_summary)
         
-        return applications
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error listing applications: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to list applications: {str(e)}")
+#         return applications
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"Error listing applications: {e}")
+#         raise HTTPException(status_code=500, detail=f"Failed to list applications: {str(e)}")
 
 
-def _build_application_summary(session: Dict[str, Any], xano_client) -> ApplicationSummary:
-    """
-    Build application summary from session data.
-    Session only has: candidate_id and Status.
-    Candidate has: Name, Score, Email, Phone, job_id, company_id, Status, etc.
-    """
-    session_id = session.get('id')
-    candidate_id = session.get('candidate_id')
-    applicant_name = None
-    applicant_email = None
-    fit_score = None
-    rating = None
-    job_title = None
-    company = None
+# def _build_application_summary(session: Dict[str, Any], xano_client) -> ApplicationSummary:
+#     """
+#     Build application summary from session data.
+#     Session only has: candidate_id and Status.
+#     Candidate has: Name, Score, Email, Phone, job_id, company_id, Status, etc.
+#     """
+#     session_id = session.get('id')
+#     candidate_id = session.get('candidate_id')
+#     applicant_name = None
+#     applicant_email = None
+#     fit_score = None
+#     rating = None
+#     job_title = None
+#     company = None
     
-    # Get candidate info if linked - candidate has job_id and company_id
-    if candidate_id:
-        candidate = xano_client.get_candidate_by_id(candidate_id)
-        if candidate:
-            applicant_name = candidate.get('Name')
-            applicant_email = candidate.get('Email')
-            fit_score = candidate.get('Score')
-            if fit_score is not None:
-                rating = _get_rating_from_score(fit_score)
+#     # Get candidate info if linked - candidate has job_id and company_id
+#     if candidate_id:
+#         candidate = xano_client.get_candidate_by_id(candidate_id)
+#         if candidate:
+#             applicant_name = candidate.get('Name')
+#             applicant_email = candidate.get('Email')
+#             fit_score = candidate.get('Score')
+#             if fit_score is not None:
+#                 rating = _get_rating_from_score(fit_score)
             
-            # Get job info using job_id from candidate (not session)
-            job_id = candidate.get('job_id')
-            if job_id:
-                job = xano_client.get_job_by_id(job_id)
-                if job:
-                    job_title = job.get('job_title')
-                    company = job.get('company')
+#             # Get job info using job_id from candidate (not session)
+#             job_id = candidate.get('job_id')
+#             if job_id:
+#                 job = xano_client.get_job_by_id(job_id)
+#                 if job:
+#                     job_title = job.get('job_title')
+#                     company = job.get('company')
             
-            # If no company from job, try to get from company_id
-            if not company:
-                company_id = candidate.get('company_id')
-                if company_id:
-                    company_data = xano_client.get_company_by_id(company_id)
-                    if company_data:
-                        company = company_data.get('name', company_data.get('company_name'))
+#             # If no company from job, try to get from company_id
+#             if not company:
+#                 company_id = candidate.get('company_id')
+#                 if company_id:
+#                     company_data = xano_client.get_company_by_id(company_id)
+#                     if company_data:
+#                         company = company_data.get('name', company_data.get('company_name'))
     
-    return ApplicationSummary(
-        session_id=session_id,
-        candidate_id=candidate_id,
-        timestamp=session.get('created_at'),
-        applicant_name=applicant_name,
-        applicant_email=applicant_email,
-        job_title=job_title,
-        company=company,
-        status=session.get('Status', 'unknown'),
-        fit_score=fit_score,
-        rating=rating,
-    )
+#     return ApplicationSummary(
+#         session_id=session_id,
+#         candidate_id=candidate_id,
+#         timestamp=session.get('created_at'),
+#         applicant_name=applicant_name,
+#         applicant_email=applicant_email,
+#         job_title=job_title,
+#         company=company,
+#         status=session.get('Status', 'unknown'),
+#         fit_score=fit_score,
+#         rating=rating,
+#     )
 
 
 @router.post("/{session_id}/calculate_fit_score")
