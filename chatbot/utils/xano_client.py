@@ -102,7 +102,7 @@ class XanoClient:
             return None
 
     def create_session(
-        self, initial_status: str = "Started", candidate_id: Optional[int] = None
+        self, initial_status: str = "Started", candidate_id: Optional[int] = None, job_id: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Create a new session in Xano
@@ -110,6 +110,7 @@ class XanoClient:
         Args:
             initial_status: Initial session status (default: "Started")
             candidate_id: Optional candidate ID to link
+            job_id: Optional job ID for the position being applied to
             
         Returns:
             Session data if successful, None otherwise
@@ -119,11 +120,13 @@ class XanoClient:
             payload = {"Status": initial_status}
             if candidate_id:
                 payload["candidate_id"] = candidate_id
-            logger.info(f"Creating new Xano session with status {initial_status}")
+            if job_id:
+                payload["job_id"] = job_id
+            logger.info(f"Creating new Xano session with status {initial_status}, job_id: {job_id}")
             response = self.session.post(url, json=payload, timeout=self.timeout)
             response.raise_for_status()
             result = response.json()
-            logger.info(f"Successfully created Xano session: {result.get('id', 'unknown')}")
+            logger.info(f"Successfully created Xano session: {result.get('id', 'unknown')} for job_id: {job_id}")
             return result
         except requests.exceptions.RequestException as e:
             logger.error(f"Error creating Xano session: {e}")

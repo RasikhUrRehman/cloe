@@ -74,7 +74,7 @@ class AgentToolkit:
             else:
                 final_status = "Ended - Early Exit"
             
-            # Update session in Xano
+            # Update session in Xano with final status and any collected info
             if xano_session_id:
                 update_data = {
                     "Status": final_status,
@@ -82,25 +82,17 @@ class AgentToolkit:
                     "conclusion_reason": reason,
                 }
                 
-                # Add candidate_id if available
-                if self.session_state.engagement and self.session_state.engagement.candidate_id:
-                    update_data["candidate_id"] = self.session_state.engagement.candidate_id
+                # Add any collected candidate info to session
+                if self.session_state.application:
+                    if self.session_state.application.full_name:
+                        update_data["candidate_name"] = self.session_state.application.full_name
+                    if self.session_state.application.email:
+                        update_data["candidate_email"] = self.session_state.application.email
+                    if self.session_state.application.phone_number:
+                        update_data["candidate_phone"] = self.session_state.application.phone_number
                 
                 self.xano_client.update_session(xano_session_id, update_data)
                 logger.info(f"Session {xano_session_id} concluded with status: {final_status}, reason: {reason}")
-            
-            # If we have candidate info but no candidate was created, create one now
-            if self.session_state.application and self.session_state.application.full_name:
-                if not (self.session_state.engagement and self.session_state.engagement.candidate_id):
-                    self.create_candidate(self.session_state.application.full_name)
-            
-            # Update candidate status if exists
-            if self.session_state.engagement and self.session_state.engagement.candidate_id:
-                candidate_status = "Application Paused" if final_status != "Completed" else "Application Complete"
-                self.xano_client.update_candidate(
-                    self.session_state.engagement.candidate_id,
-                    {"Status": candidate_status}
-                )
             
             return f"Session concluded successfully. Status: {final_status}. Reason: {reason}"
             
@@ -108,99 +100,38 @@ class AgentToolkit:
             logger.error(f"Error concluding session: {e}")
             return f"Session ended with note: {reason}"
     
-    def create_candidate(self, name: str) -> str:
+    def store_candidate_info(self, info: str) -> str:
         """
-        Create a new candidate record when you have collected the candidate's name.
+        Store candidate information in the session state.
+        This information is kept in memory and stored in session for generating results.
         
         Args:
-            name: The candidate's full name
+            info: A string describing what to store (e.g., 'email: john@example.com')
         """
         try:
-            # Check if candidate already exists for this session
-            if self.session_state.engagement and self.session_state.engagement.candidate_id:
-                return f"Candidate already exists with ID {self.session_state.engagement.candidate_id}"
-            
-            # Get job_id from toolkit (passed during session creation)
-            job_id = self.job_id
-            company_id = None
             xano_session_id = None
-            
-            if job_id:
-                logger.info(f"Using job_id from toolkit: {job_id}")
-            
-            # Also check engagement state for additional info
             if self.session_state.engagement:
-                # If job_id not set from toolkit, try engagement state
-                if not job_id:
-                    job_id = self.session_state.engagement.job_id
-                company_id = self.session_state.engagement.company_id
                 xano_session_id = self.session_state.engagement.xano_session_id
             
-            # Create candidate in Xano
-            candidate = self.xano_client.create_candidate(
-                name=name,
-                job_id=job_id,
-                company_id=company_id,
-                session_id=xano_session_id,
-                status="Short Listed"
-            )
-            
-            if candidate:
-                candidate_id = candidate.get('id')
-                # Store candidate_id in engagement state
-                if self.session_state.engagement:
-                    self.session_state.engagement.candidate_id = candidate_id
-                    # Update session with candidate_id in Xano
-                    if xano_session_id:
-                        self.xano_client.update_session(xano_session_id, {"candidate_id": candidate_id})
-                
-                logger.info(f"Created candidate {candidate_id} for session {self.session_state.session_id}")
-                return f"Candidate created successfully with ID {candidate_id}"
-            else:
-                logger.warning("Failed to create candidate in Xano")
-                return "Failed to create candidate record"
-        except Exception as e:
-            logger.error(f"Error creating candidate: {e}")
-            return f"Error creating candidate: {str(e)}"
-    
-    def update_candidate(self, info: str) -> str:
-        """
-        Update the candidate record with new information.
-        
-        Args:
-            info: A string describing what to update (e.g., 'email: john@example.com')
-        """
-        try:
-            if not self.session_state.engagement or not self.session_state.engagement.candidate_id:
-                return "No candidate record found. Please create a candidate first."
-            
-            candidate_id = self.session_state.engagement.candidate_id
             update_data = {}
             
-            # Parse the info string to extract what to update
+            # Parse the info string to extract what to store
             info_lower = info.lower()
             
             if 'email:' in info_lower:
                 email = info.split('email:')[1].strip().split()[0]
-                update_data['Email'] = email
+                update_data['candidate_email'] = email
+                if self.session_state.application:
+                    self.session_state.application.email = email
             
             if 'phone:' in info_lower:
                 phone_str = info.split('phone:')[1].strip().split()[0]
                 # Clean phone number
                 phone_clean = ''.join(filter(str.isdigit, phone_str))
                 if phone_clean:
-                    update_data['Phone'] = int(phone_clean)
-            
-            if 'status:' in info_lower:
-                status = info.split('status:')[1].strip().split()[0]
-                update_data['Status'] = status
-            
-            if 'score:' in info_lower:
-                score_str = info.split('score:')[1].strip().split()[0]
-                try:
-                    update_data['Score'] = float(score_str)
-                except ValueError:
-                    pass
+                    update_data['candidate_phone'] = phone_clean
+                    if self.session_state.application:
+                        self.session_state.application.phone_number = phone_clean
             
             if 'name:' in info_lower:
                 # Extract name after "name:"
@@ -208,22 +139,22 @@ class AgentToolkit:
                 # Take until next colon or end
                 if ':' in name:
                     name = name.split(':')[0].strip()
-                update_data['Name'] = name
+                update_data['candidate_name'] = name
+                if self.session_state.application:
+                    self.session_state.application.full_name = name
             
             if not update_data:
-                return "Could not parse update information. Use format like 'email: john@example.com' or 'phone: 1234567890'"
+                return "Could not parse information. Use format like 'email: john@example.com' or 'phone: 1234567890' or 'name: John Doe'"
             
-            # Update in Xano
-            result = self.xano_client.update_candidate(candidate_id, update_data)
+            # Update session in Xano with candidate info (stored in session, not candidate table)
+            if xano_session_id:
+                self.xano_client.update_session(xano_session_id, update_data)
+                logger.info(f"Updated session {xano_session_id} with candidate info: {update_data}")
             
-            if result:
-                logger.info(f"Updated candidate {candidate_id} with {update_data}")
-                return f"Candidate updated successfully: {update_data}"
-            else:
-                return "Failed to update candidate record"
+            return f"Information saved: {update_data}"
         except Exception as e:
-            logger.error(f"Error updating candidate: {e}")
-            return f"Error updating candidate: {str(e)}"
+            logger.error(f"Error storing candidate info: {e}")
+            return f"Error storing information: {str(e)}"
     
     def get_tools(self) -> List[StructuredTool]:
         """
@@ -239,14 +170,9 @@ class AgentToolkit:
                 description="Save the current conversation state to persistent storage. Use this to save key conversation milestones like when user starts application, shares resume, or agrees to proceed.",
             ),
             StructuredTool.from_function(
-                func=self.create_candidate,
-                name="create_candidate",
-                description="Create a new candidate record when you have collected the candidate's name. Use this when you first learn the candidate's name. Input should be the candidate's full name. IMPORTANT: The job_id will be automatically associated with the candidate - you MUST use this tool to properly link the candidate to the job they are applying for.",
-            ),
-            StructuredTool.from_function(
-                func=self.update_candidate,
-                name="update_candidate",
-                description="Update the candidate record with new information like email, phone, or score. Input should be a string describing what to update, e.g., 'email: john@example.com' or 'phone: 1234567890' or 'status: Qualified'",
+                func=self.store_candidate_info,
+                name="store_candidate_info",
+                description="Store candidate information like name, email, or phone in the session. Use this when you collect personal information from the candidate. Input should be a string like 'name: John Doe' or 'email: john@example.com' or 'phone: 1234567890'. This saves the information for generating results.",
             ),
             StructuredTool.from_function(
                 func=self.conclude_session,

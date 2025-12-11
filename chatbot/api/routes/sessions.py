@@ -30,7 +30,6 @@ class SessionCreateRequest(BaseModel):
     """Request model for creating a new session"""
     job_id: Optional[str] = Field(default=None, description="Job ID to apply for")
     language: Optional[str] = Field(default="en", description="Language code")
-    candidate_id: Optional[int] = Field(default=None, description="Candidate ID to link")
 
 
 class SessionCreateResponse(BaseModel):
@@ -71,14 +70,18 @@ class SessionDetailsResponse(BaseModel):
 class SessionUpdateRequest(BaseModel):
     """Request model for updating session"""
     status: Optional[str] = Field(default=None, description="Session status")
-    candidate_id: Optional[int] = Field(default=None, description="Candidate ID")
+    candidate_name: Optional[str] = Field(default=None, description="Candidate name")
+    candidate_email: Optional[str] = Field(default=None, description="Candidate email")
+    candidate_phone: Optional[str] = Field(default=None, description="Candidate phone")
 
 
 class XanoSessionResponse(BaseModel):
     """Response model for Xano session data"""
     id: int
     status: Optional[str] = None
-    candidate_id: Optional[int] = None
+    candidate_name: Optional[str] = None
+    candidate_email: Optional[str] = None
+    candidate_phone: Optional[str] = None
     created_at: Optional[Any] = None  # Can be int (timestamp) or str
 
 
@@ -307,7 +310,7 @@ async def get_session_details(session_id: str):
 @router.patch("/{session_id}")
 async def update_session(session_id: str, request: SessionUpdateRequest):
     """
-    Update session status or candidate_id in Xano.
+    Update session status or candidate info in Xano.
     Returns 404 if the session does not exist.
     """
     try:
@@ -326,8 +329,12 @@ async def update_session(session_id: str, request: SessionUpdateRequest):
         
         if request.status:
             update_data["Status"] = request.status
-        if request.candidate_id:
-            update_data["candidate_id"] = request.candidate_id
+        if request.candidate_name:
+            update_data["candidate_name"] = request.candidate_name
+        if request.candidate_email:
+            update_data["candidate_email"] = request.candidate_email
+        if request.candidate_phone:
+            update_data["candidate_phone"] = request.candidate_phone
         
         if update_data:
             result = xano_client.update_session(
