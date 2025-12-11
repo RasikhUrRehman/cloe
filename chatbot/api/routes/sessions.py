@@ -30,7 +30,6 @@ class SessionCreateRequest(BaseModel):
     """Request model for creating a new session"""
     job_id: Optional[str] = Field(default=None, description="Job ID to apply for")
     language: Optional[str] = Field(default="en", description="Language code")
-    candidate_id: Optional[int] = Field(default=None, description="Candidate ID to link")
 
 
 class SessionCreateResponse(BaseModel):
@@ -71,14 +70,18 @@ class SessionDetailsResponse(BaseModel):
 class SessionUpdateRequest(BaseModel):
     """Request model for updating session"""
     status: Optional[str] = Field(default=None, description="Session status")
-    candidate_id: Optional[int] = Field(default=None, description="Candidate ID")
+    candidate_name: Optional[str] = Field(default=None, description="Candidate name")
+    candidate_email: Optional[str] = Field(default=None, description="Candidate email")
+    candidate_phone: Optional[str] = Field(default=None, description="Candidate phone")
 
 
 class XanoSessionResponse(BaseModel):
     """Response model for Xano session data"""
     id: int
     status: Optional[str] = None
-    candidate_id: Optional[int] = None
+    candidate_name: Optional[str] = None
+    candidate_email: Optional[str] = None
+    candidate_phone: Optional[str] = None
     created_at: Optional[Any] = None  # Can be int (timestamp) or str
 
 
