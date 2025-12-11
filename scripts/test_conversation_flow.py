@@ -10,6 +10,7 @@ from chatbot.state.states import ConversationStage
 from chatbot.utils.config import ensure_directories
 from chatbot.utils.fit_score import FitScoreCalculator
 from chatbot.utils.utils import setup_logging
+from chatbot.utils.job_fetcher import get_all_jobs
 logger = setup_logging()
 def print_separator(title=""):
     """Print a visual separator"""
@@ -45,32 +46,34 @@ def test_complete_application_flow():
     print_separator("CLEO CHATBOT - COMPLETE APPLICATION FLOW TEST")
     # Ensure directories exist
     ensure_directories()
+    
+    # Fetch a real job from Xano
+    print("Fetching available jobs from Xano...")
+    jobs = get_all_jobs()
+    
+    if not jobs:
+        print("⚠️ No jobs found in Xano. Please create a job first.")
+        print("Exiting test...")
+        return
+    
+    # Use the first available job
+    test_job = jobs[0]
+    job_id = str(test_job.get('id'))
+    print(f"Using job: {test_job.get('job_title', 'Unknown')} (ID: {job_id})")
+    
     # Create agent with job context
     print("Initializing agent with job context...")
-    agent = CleoRAGAgent()
-    # Set a job for testing (simulate warehouse job)
+    agent = CleoRAGAgent(job_id=job_id)
+    
+    # Set job for testing with real Xano data
     from chatbot.state.states import EngagementState
     agent.session_state.engagement = EngagementState(
         session_id=agent.session_state.session_id,
-        job_id="WAREHOUSE-001",
-        job_details={
-            "title": "Warehouse Associate",
-            "company": "ABC Logistics",
-            "location": "Los Angeles, CA",
-            "type": "Full-time",
-            "shift": "Day shift (8am-5pm)",
-            "requirements": [
-                "Must be 18 years or older",
-                "Valid work authorization in the US",
-                "Ability to lift 50 lbs",
-                "Forklift certification preferred"
-            ],
-            "salary": "$18-22/hour",
-            "benefits": ["Health insurance", "401k", "Paid time off"]
-        }
+        job_id=job_id,
+        job_details=test_job
     )
     print(f"Session ID: {agent.session_state.session_id}")
-    print(f"Job: {agent.session_state.engagement.job_details['title']}")
+    print(f"Job: {test_job.get('job_title', 'Unknown')}")
     print()
     # ========================================
     # ENGAGEMENT STAGE
@@ -103,6 +106,53 @@ def test_complete_application_flow():
     send_message(agent, "I have skills in forklift operation, inventory management, packing, and shipping")
     send_message(agent, "Yes, I can provide references from my previous employer")
     send_message(agent, "I prefer email for communication")
+    send_message(agent, "okk Good Bye")
+    
+    # ========================================
+    # WAIT FOR SESSION CONCLUSION
+    # ========================================
+    print_separator("WAITING FOR SESSION TO WIND UP")
+    print("⏳ Waiting 3 minutes for agent to conclude session and create candidate...")
+    print(f"Start time: {datetime.now().strftime('%H:%M:%S')}")
+    
+    # Wait for 3 minutes (180 seconds)
+    for remaining in range(180, 0, -30):
+        print(f"   ⏰ {remaining} seconds remaining...")
+        time.sleep(30)
+    
+    print(f"End time: {datetime.now().strftime('%H:%M:%S')}")
+    print("✅ Wait complete. Triggering session conclusion...")
+    print()
+    
+    # ========================================
+    # TRIGGER SESSION CONCLUSION
+    # ========================================
+    print_separator("SESSION CONCLUSION & CANDIDATE CREATION")
+    try:
+        # Get the toolkit to manually conclude the session
+        from chatbot.core.tools import AgentToolkit
+        toolkit = AgentToolkit(
+            session_state=agent.session_state,
+            job_id=agent.session_state.engagement.job_id if agent.session_state.engagement else None,
+            agent=agent
+        )
+        
+        # Conclude the session
+        conclusion_result = toolkit.conclude_session("Test completed - winding up session")
+        print(f"Conclusion Result: {conclusion_result}")
+        print()
+        
+        # Check if candidate was created
+        if agent.session_state.engagement and agent.session_state.engagement.candidate_id:
+            print(f"✅ SUCCESS: Candidate created with ID: {agent.session_state.engagement.candidate_id}")
+        else:
+            print("⚠️ WARNING: No candidate ID found in engagement state")
+            
+    except Exception as e:
+        print(f"❌ ERROR during session conclusion: {e}")
+        import traceback
+        traceback.print_exc()
+    
     # ========================================
     # VERIFICATION STAGE
     # ========================================
@@ -179,7 +229,8 @@ def test_complete_application_flow():
     assert agent.session_state.engagement.stage_completed, "❌ Engagement stage should be completed"
     assert agent.session_state.qualification.stage_completed, "❌ Qualification stage should be completed"
     assert agent.session_state.application.stage_completed, "❌ Application stage should be completed"
-    assert agent.session_state.current_stage == ConversationStage.VERIFICATION, "❌ Should be in VERIFICATION stage"
+    # Note: Stage might be COMPLETED instead of VERIFICATION after all data is collected
+    assert agent.session_state.current_stage in [ConversationStage.VERIFICATION, ConversationStage.COMPLETED], "❌ Should be in VERIFICATION or COMPLETED stage"
     print("✅ All stage transitions verified successfully!")
     # ========================================
     # SAVE SESSION
@@ -207,6 +258,58 @@ def test_complete_application_flow():
     print(f"  ✅ Ready for Verification: {agent.session_state.application.stage_completed if agent.session_state.application else False}")
     print()
     return application_data
+
+
+def test_conclude_requires_name_email_phone():
+    """Ensure conclude will not create a candidate unless name, email, and phone are present"""
+    from chatbot.core.tools import AgentToolkit
+    from chatbot.utils.fit_score import FitScoreComponents
+    from chatbot.state.states import ApplicationState
+
+    agent = CleoRAGAgent()
+    # Initialize application state with only a name (missing email and phone)
+    agent.session_state.application = ApplicationState(session_id=agent.session_state.session_id, full_name="Jane Doe")
+    toolkit = AgentToolkit(agent.session_state)
+    fit_score = FitScoreComponents(qualification_score=0.0, experience_score=0.0, personality_score=0.0, total_score=0.0, breakdown={})
+    candidate_id = toolkit._create_candidate_on_conclude(fit_score, None)
+    assert candidate_id is None, "Candidate should not be created without email and phone"
+
+
+def test_conclude_fetches_from_memory():
+    """Ensure conclude will attempt to fetch missing name/email/phone from conversation memory and create candidate"""
+    from chatbot.core.tools import AgentToolkit
+    from chatbot.utils.fit_score import FitScoreComponents
+    agent = CleoRAGAgent()
+    # Ensure application state is empty
+    agent.session_state.application = None
+    # Inject messages into memory that contain contact info
+    from langchain.schema import HumanMessage
+    agent.memory.chat_memory.add_message(HumanMessage(content="My name is Alice Wonderland"))
+    agent.memory.chat_memory.add_message(HumanMessage(content="My email is alice@example.com"))
+    agent.memory.chat_memory.add_message(HumanMessage(content="My phone number is +15551234567"))
+
+    # Verify application still empty
+    assert not agent.session_state.application or not agent.session_state.application.full_name
+
+    # Bind toolkit to agent so it can read memory
+    toolkit = AgentToolkit(agent.session_state, agent.job_id, agent=agent)
+
+    # Replace xano_client with dummy to avoid HTTP calls
+    class DummyXanoClient:
+        def create_candidate(self, **kwargs):
+            return {"id": 999}
+        def update_session(self, *args, **kwargs):
+            return True
+    toolkit.xano_client = DummyXanoClient()
+    toolkit._report_generator = toolkit._report_generator  # keep existing generator if any
+
+    fit_score = FitScoreComponents(qualification_score=0.0, experience_score=0.0, personality_score=0.0, total_score=0.0, breakdown={})
+    # Call conclude_session - it should read from memory and create candidate
+    result = toolkit.conclude_session("User said goodbye")
+    assert "Session concluded successfully" in result
+    # Verify candidate created and stored in engagement state
+    if agent.session_state.engagement:
+        assert agent.session_state.engagement.candidate_id == 999
 if __name__ == "__main__":
     try:
         application_data = test_complete_application_flow()

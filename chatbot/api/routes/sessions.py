@@ -144,309 +144,305 @@ async def create_session(request: SessionCreateRequest):
         raise HTTPException(status_code=500, detail=f"Failed to create session: {str(e)}")
 
 
-@router.get("", response_model=List[XanoSessionResponse])
-async def list_sessions():
-    """
-    List all sessions from Xano
-    """
-    try:
-        xano_client = get_xano_client()
-        sessions = xano_client.get_sessions()
-        if sessions is None:
-            return []
-        return sessions
-    except Exception as e:
-        logger.error(f"Error listing sessions: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to list sessions: {str(e)}")
+# @router.get("", response_model=List[XanoSessionResponse])
+# async def list_sessions():
+#     """
+#     List all sessions from Xano
+#     """
+#     try:
+#         xano_client = get_xano_client()
+#         sessions = xano_client.get_sessions()
+#         if sessions is None:
+#             return []
+#         return sessions
+#     except Exception as e:
+#         logger.error(f"Error listing sessions: {e}")
+#         raise HTTPException(status_code=500, detail=f"Failed to list sessions: {str(e)}")
 
 
-@router.get("/{session_id}/status", response_model=SessionStatusResponse)
-async def get_session_status(session_id: str):
-    """
-    Get the current status of a session.
-    Returns 404 if the session does not exist.
-    Note: This endpoint no longer syncs to Xano on every call to reduce log noise.
-    Xano sync happens only on state changes (via process_message).
-    """
-    try:
-        session_manager = get_session_manager()
+# @router.get("/{session_id}/status", response_model=SessionStatusResponse)
+# async def get_session_status(session_id: str):
+#     """
+#     Get the current status of a session.
+#     Returns 404 if the session does not exist.
+#     Note: This endpoint no longer syncs to Xano on every call to reduce log noise.
+#     Xano sync happens only on state changes (via process_message).
+#     """
+#     try:
+#         session_manager = get_session_manager()
         
-        if not session_manager.has_session(session_id):
-            raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+#         if not session_manager.has_session(session_id):
+#             raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
         
-        agent = session_manager.get_session(session_id)
-        summary = agent.get_conversation_summary()
+#         agent = session_manager.get_session(session_id)
+#         summary = agent.get_conversation_summary()
         
-        # Note: Removed sync_session_state_to_xano() call here
-        # Xano sync now happens only on actual state changes in process_message
+#         # Note: Removed sync_session_state_to_xano() call here
+#         # Xano sync now happens only on actual state changes in process_message
         
-        # Get verification_complete from agent state
-        verification_complete = False
-        if agent.session_state.verification:
-            verification_complete = agent.session_state.verification.stage_completed
+#         # Get verification_complete from agent state
+#         verification_complete = False
+#         if agent.session_state.verification:
+#             verification_complete = agent.session_state.verification.stage_completed
 
-        return SessionStatusResponse(
-            session_id=summary["session_id"],
-            current_stage=summary["current_stage"],
-            engagement_complete=summary["engagement_complete"],
-            qualification_complete=summary["qualification_complete"],
-            application_complete=summary["application_complete"],
-            verification_complete=verification_complete,
-            ready_for_verification=summary["ready_for_verification"],
-        )
-    except Exception as e:
-        logger.error(f"Error getting session status: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get session status: {str(e)}")
-
-
-@router.get("/{session_id}/xano-status")
-async def get_session_xano_status(session_id: str):
-    """
-    Get the real-time synchronized session status from Xano.
-    This endpoint first syncs the local session state to Xano,
-    then returns the status as stored in Xano.
-    """
-    try:
-        session_manager = get_session_manager()
-        
-        if not session_manager.has_session(session_id):
-            raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-        
-        agent = session_manager.get_session(session_id)
-        
-        # First sync the current state to Xano
-        agent.sync_session_state_to_xano()
-        
-        # Then get the status from Xano
-        xano_status = agent.get_xano_session_status()
-        
-        return {
-            "session_id": session_id,
-            **xano_status,
-            "local_current_stage": agent.session_state.current_stage.value,
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting Xano session status: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get Xano status: {str(e)}")
+#         return SessionStatusResponse(
+#             session_id=summary["session_id"],
+#             current_stage=summary["current_stage"],
+#             engagement_complete=summary["engagement_complete"],
+#             qualification_complete=summary["qualification_complete"],
+#             application_complete=summary["application_complete"],
+#             verification_complete=verification_complete,
+#             ready_for_verification=summary["ready_for_verification"],
+#         )
+#     except Exception as e:
+#         logger.error(f"Error getting session status: {e}")
+#         raise HTTPException(status_code=500, detail=f"Failed to get session status: {str(e)}")
 
 
-@router.get("/{session_id}", response_model=SessionDetailsResponse)
-async def get_session_details(session_id: str):
-    """
-    Get complete session details including chat history from Xano.
-    Returns 404 if the session does not exist.
-    """
-    try:
-        session_manager = get_session_manager()
+# @router.get("/{session_id}/xano-status")
+# async def get_session_xano_status(session_id: str):
+#     """
+#     Get the real-time synchronized session status from Xano.
+#     This endpoint first syncs the local session state to Xano,
+#     then returns the status as stored in Xano.
+#     """
+#     try:
+#         session_manager = get_session_manager()
         
-        if not session_manager.has_session(session_id):
-            raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+#         if not session_manager.has_session(session_id):
+#             raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
         
-        agent = session_manager.get_session(session_id)
-        summary = agent.get_conversation_summary()
+#         agent = session_manager.get_session(session_id)
         
-        # Get chat history from Xano
-        chat_history = []
-        xano_client = get_xano_client()
-        if agent.session_state.engagement and agent.session_state.engagement.xano_session_id:
-            messages = xano_client.get_messages_by_session_id(
-                agent.session_state.engagement.xano_session_id
-            )
-            if messages:
-                for msg in messages:
-                    chat_history.append({
-                        "role": "human" if msg.get("MsgCreator") == "User" else "ai",
-                        "content": msg.get("MsgContent", ""),
-                        "timestamp": msg.get("created_at", datetime.utcnow().isoformat())
-                    })
-
-        # Prepare state data
-        engagement_data = None
-        if agent.session_state.engagement:
-            engagement_data = agent.session_state.engagement.model_dump()
-
-        qualification_data = None
-        if agent.session_state.qualification:
-            qualification_data = agent.session_state.qualification.model_dump()
-
-        application_data = None
-        if agent.session_state.application:
-            application_data = agent.session_state.application.model_dump()
-
-        verification_data = None
-        if agent.session_state.verification:
-            verification_data = agent.session_state.verification.model_dump()
-
-        job_details = None
-        if agent.session_state.engagement and agent.session_state.engagement.job_details:
-            job_details = agent.session_state.engagement.job_details
-
-        return SessionDetailsResponse(
-            session_id=agent.session_state.session_id,
-            xano_session_id=agent.session_state.engagement.xano_session_id if agent.session_state.engagement else None,
-            current_stage=agent.session_state.current_stage.value,
-            created_at=agent.session_state.created_at,
-            updated_at=agent.session_state.updated_at,
-            engagement=engagement_data,
-            qualification=qualification_data,
-            application=application_data,
-            verification=verification_data,
-            chat_history=chat_history,
-            job_details=job_details,
-            status={
-                "engagement_complete": summary["engagement_complete"],
-                "qualification_complete": summary["qualification_complete"],
-                "application_complete": summary["application_complete"],
-                "ready_for_verification": summary["ready_for_verification"],
-            }
-        )
-    except Exception as e:
-        logger.error(f"Error getting session details: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get session details: {str(e)}")
+#         # First sync the current state to Xano
+#         agent.sync_session_state_to_xano()
+        
+#         # Then get the status from Xano
+#         xano_status = agent.get_xano_session_status()
+        
+#         return {
+#             "session_id": session_id,
+#             **xano_status,
+#             "local_current_stage": agent.session_state.current_stage.value,
+#         }
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"Error getting Xano session status: {e}")
+#         raise HTTPException(status_code=500, detail=f"Failed to get Xano status: {str(e)}")
 
 
-@router.patch("/{session_id}")
-async def update_session(session_id: str, request: SessionUpdateRequest):
-    """
-    Update session status or candidate info in Xano.
-    Returns 404 if the session does not exist.
-    """
-    try:
-        session_manager = get_session_manager()
+# @router.get("/{session_id}", response_model=SessionDetailsResponse)
+# async def get_session_details(session_id: str):
+#     """
+#     Get complete session details including chat history from Xano.
+#     Returns 404 if the session does not exist.
+#     """
+#     try:
+#         session_manager = get_session_manager()
         
-        if not session_manager.has_session(session_id):
-            raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+#         if not session_manager.has_session(session_id):
+#             raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
         
-        agent = session_manager.get_session(session_id)
+#         agent = session_manager.get_session(session_id)
+#         summary = agent.get_conversation_summary()
         
-        if not agent.session_state.engagement or not agent.session_state.engagement.xano_session_id:
-            raise HTTPException(status_code=404, detail="Session not found in Xano")
-        
-        xano_client = get_xano_client()
-        update_data = {}
-        
-        if request.status:
-            update_data["Status"] = request.status
-        if request.candidate_name:
-            update_data["candidate_name"] = request.candidate_name
-        if request.candidate_email:
-            update_data["candidate_email"] = request.candidate_email
-        if request.candidate_phone:
-            update_data["candidate_phone"] = request.candidate_phone
-        
-        if update_data:
-            result = xano_client.update_session(
-                agent.session_state.engagement.xano_session_id,
-                update_data
-            )
-            if result:
-                return {"message": "Session updated successfully", "session": result}
-            else:
-                raise HTTPException(status_code=500, detail="Failed to update session in Xano")
-        
-        return {"message": "No updates provided"}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error updating session: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to update session: {str(e)}")
+#         # Get chat history from Xano
+#         chat_history = []
+#         xano_client = get_xano_client()
+#         if agent.session_state.engagement and agent.session_state.engagement.xano_session_id:
+#             messages = xano_client.get_messages_by_session_id(
+#                 agent.session_state.engagement.xano_session_id
+#             )
+#             if messages:
+#                 for msg in messages:
+#                     chat_history.append({
+#                         "role": "human" if msg.get("MsgCreator") == "User" else "ai",
+#                         "content": msg.get("MsgContent", ""),
+#                         "timestamp": msg.get("created_at", datetime.utcnow().isoformat())
+#                     })
+
+#         # Prepare state data
+#         engagement_data = None
+#         if agent.session_state.engagement:
+#             engagement_data = agent.session_state.engagement.model_dump()
+
+#         qualification_data = None
+#         if agent.session_state.qualification:
+#             qualification_data = agent.session_state.qualification.model_dump()
+
+#         application_data = None
+#         if agent.session_state.application:
+#             application_data = agent.session_state.application.model_dump()
+
+#         verification_data = None
+#         if agent.session_state.verification:
+#             verification_data = agent.session_state.verification.model_dump()
+
+#         job_details = None
+#         if agent.session_state.engagement and agent.session_state.engagement.job_details:
+#             job_details = agent.session_state.engagement.job_details
+
+#         return SessionDetailsResponse(
+#             session_id=agent.session_state.session_id,
+#             xano_session_id=agent.session_state.engagement.xano_session_id if agent.session_state.engagement else None,
+#             current_stage=agent.session_state.current_stage.value,
+#             created_at=agent.session_state.created_at,
+#             updated_at=agent.session_state.updated_at,
+#             engagement=engagement_data,
+#             qualification=qualification_data,
+#             application=application_data,
+#             verification=verification_data,
+#             chat_history=chat_history,
+#             job_details=job_details,
+#             status={
+#                 "engagement_complete": summary["engagement_complete"],
+#                 "qualification_complete": summary["qualification_complete"],
+#                 "application_complete": summary["application_complete"],
+#                 "ready_for_verification": summary["ready_for_verification"],
+#             }
+#         )
+#     except Exception as e:
+#         logger.error(f"Error getting session details: {e}")
+#         raise HTTPException(status_code=500, detail=f"Failed to get session details: {str(e)}")
 
 
-@router.delete("/{session_id}")
-async def delete_session(session_id: str):
-    """
-    Delete a session from both memory and Xano
-    """
-    try:
-        xano_client = get_xano_client()
-        session_manager = get_session_manager()
+# @router.patch("/{session_id}")
+# async def update_session(session_id: str, request: SessionUpdateRequest):
+#     """
+#     Update session status or candidate_id in Xano.
+#     Returns 404 if the session does not exist.
+#     """
+#     try:
+#         session_manager = get_session_manager()
         
-        if session_manager.has_session(session_id):
-            agent = session_manager.get_session(session_id)
+#         if not session_manager.has_session(session_id):
+#             raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+        
+#         agent = session_manager.get_session(session_id)
+        
+#         if not agent.session_state.engagement or not agent.session_state.engagement.xano_session_id:
+#             raise HTTPException(status_code=404, detail="Session not found in Xano")
+        
+#         xano_client = get_xano_client()
+#         update_data = {}
+        
+#         if request.status:
+#             update_data["Status"] = request.status
+#         if request.candidate_id:
+#             update_data["candidate_id"] = request.candidate_id
+        
+#         if update_data:
+#             result = xano_client.update_session(
+#                 agent.session_state.engagement.xano_session_id,
+#                 update_data
+#             )
+#             if result:
+#                 return {"message": "Session updated successfully", "session": result}
+#             else:
+#                 raise HTTPException(status_code=500, detail="Failed to update session in Xano")
+        
+#         return {"message": "No updates provided"}
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"Error updating session: {e}")
+#         raise HTTPException(status_code=500, detail=f"Failed to update session: {str(e)}")
+
+
+# @router.delete("/{session_id}")
+# async def delete_session(session_id: str):
+#     """
+#     Delete a session from both memory and Xano
+#     """
+#     try:
+#         xano_client = get_xano_client()
+#         session_manager = get_session_manager()
+        
+#         if session_manager.has_session(session_id):
+#             agent = session_manager.get_session(session_id)
             
-            # Delete from Xano if exists
-            if agent.session_state.engagement and agent.session_state.engagement.xano_session_id:
-                xano_client.delete_session(agent.session_state.engagement.xano_session_id)
+#             # Delete from Xano if exists
+#             if agent.session_state.engagement and agent.session_state.engagement.xano_session_id:
+#                 xano_client.delete_session(agent.session_state.engagement.xano_session_id)
             
-            session_manager.remove_session(session_id)
-            logger.info(f"Deleted session: {session_id}")
-            return {"message": f"Session {session_id} deleted successfully"}
-        else:
-            raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error deleting session: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to delete session: {str(e)}")
+#             session_manager.remove_session(session_id)
+#             logger.info(f"Deleted session: {session_id}")
+#             return {"message": f"Session {session_id} deleted successfully"}
+#         else:
+#             raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"Error deleting session: {e}")
+#         raise HTTPException(status_code=500, detail=f"Failed to delete session: {str(e)}")
 
 
-@router.post("/{session_id}/reset")
-async def reset_session(session_id: str):
-    """
-    Reset a session's conversation memory
-    """
-    try:
-        session_manager = get_session_manager()
+# @router.post("/{session_id}/reset")
+# async def reset_session(session_id: str):
+#     """
+#     Reset a session's conversation memory
+#     """
+#     try:
+#         session_manager = get_session_manager()
         
-        if session_manager.has_session(session_id):
-            agent = session_manager.get_session(session_id)
-            agent.reset_conversation()
-            logger.info(f"Reset session: {session_id}")
-            return {"message": f"Session {session_id} reset successfully"}
-        else:
-            raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error resetting session: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to reset session: {str(e)}")
+#         if session_manager.has_session(session_id):
+#             agent = session_manager.get_session(session_id)
+#             agent.reset_conversation()
+#             logger.info(f"Reset session: {session_id}")
+#             return {"message": f"Session {session_id} reset successfully"}
+#         else:
+#             raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"Error resetting session: {e}")
+#         raise HTTPException(status_code=500, detail=f"Failed to reset session: {str(e)}")
 
 
-# Xano direct session APIs
-@router.get("/xano/{xano_session_id}")
-async def get_xano_session(xano_session_id: int):
-    """
-    Get session directly from Xano by Xano session ID.
-    If there's an active agent with this Xano session, it will sync the state first.
-    """
-    try:
-        xano_client = get_xano_client()
-        session_manager = get_session_manager()
+# # Xano direct session APIs
+# @router.get("/xano/{xano_session_id}")
+# async def get_xano_session(xano_session_id: int):
+#     """
+#     Get session directly from Xano by Xano session ID.
+#     If there's an active agent with this Xano session, it will sync the state first.
+#     """
+#     try:
+#         xano_client = get_xano_client()
+#         session_manager = get_session_manager()
         
-        # Try to find the active agent with this xano_session_id and sync its state
-        for local_session_id, agent in session_manager.sessions.items():
-            if (agent.session_state.engagement and 
-                agent.session_state.engagement.xano_session_id == xano_session_id):
-                # Found the active agent, sync its state to Xano first
-                agent.sync_session_state_to_xano()
-                logger.info(f"Synced active agent state for xano_session {xano_session_id}")
-                break
+#         # Try to find the active agent with this xano_session_id and sync its state
+#         for local_session_id, agent in session_manager.sessions.items():
+#             if (agent.session_state.engagement and 
+#                 agent.session_state.engagement.xano_session_id == xano_session_id):
+#                 # Found the active agent, sync its state to Xano first
+#                 agent.sync_session_state_to_xano()
+#                 logger.info(f"Synced active agent state for xano_session {xano_session_id}")
+#                 break
         
-        session = xano_client.get_session_by_id(xano_session_id)
-        if session:
-            return session
-        raise HTTPException(status_code=404, detail=f"Session {xano_session_id} not found")
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting Xano session: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get session: {str(e)}")
+#         session = xano_client.get_session_by_id(xano_session_id)
+#         if session:
+#             return session
+#         raise HTTPException(status_code=404, detail=f"Session {xano_session_id} not found")
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"Error getting Xano session: {e}")
+#         raise HTTPException(status_code=500, detail=f"Failed to get session: {str(e)}")
 
 
-@router.delete("/xano/{xano_session_id}")
-async def delete_xano_session(xano_session_id: int):
-    """
-    Delete session directly from Xano
-    """
-    try:
-        xano_client = get_xano_client()
-        if xano_client.delete_session(xano_session_id):
-            return {"message": f"Xano session {xano_session_id} deleted successfully"}
-        raise HTTPException(status_code=500, detail="Failed to delete session from Xano")
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error deleting Xano session: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to delete session: {str(e)}")
+# @router.delete("/xano/{xano_session_id}")
+# async def delete_xano_session(xano_session_id: int):
+#     """
+#     Delete session directly from Xano
+#     """
+#     try:
+#         xano_client = get_xano_client()
+#         if xano_client.delete_session(xano_session_id):
+#             return {"message": f"Xano session {xano_session_id} deleted successfully"}
+#         raise HTTPException(status_code=500, detail="Failed to delete session from Xano")
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"Error deleting Xano session: {e}")
+#         raise HTTPException(status_code=500, detail=f"Failed to delete session: {str(e)}")

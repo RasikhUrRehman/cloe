@@ -162,39 +162,35 @@ Location: {job_details.get('location', 'N/A')}
 Requirements: {job_details.get('requirements', 'N/A')}
 """
     
-    # Create prompt for the LLM - Concise candidate review with fit score
-    summary_prompt = f"""You are an HR analyst summarizing a job application conversation. Provide a clear, concise assessment with a fit score.
+    # Create prompt for the LLM
+    summary_prompt = f"""You are an expert HR analyst reviewing a job application conversation. Analyze the following conversation deeply and provide a comprehensive assessment of the candidate.
 
 {f"JOB DETAILS:{job_context}" if job_context else ""}
 
 CONVERSATION TRANSCRIPT:
 {transcript}
 
-Provide your assessment in this exact format:
+Carefully read through the entire conversation and extract meaningful insights about this candidate. Pay attention to:
+- What specific experience, skills, or qualifications they mentioned
+- How they communicate (clarity, professionalism, enthusiasm)
+- Their work history, education, or relevant background
+- Their motivations, goals, and interest in the role
+- Any red flags or concerns
+- Their personality traits and attitude
+
+Provide your analysis in the following exact format (use these exact headers):
 
 DISCUSSION SUMMARY:
-[Write 2-3 sentences summarizing what was discussed - candidate background, qualifications mentioned, and key points from the conversation.]
+[Write a comprehensive 4-6 sentence summary covering: what topics were discussed, key information the candidate shared about their background and experience, their level of engagement, and the overall flow of the conversation. Be specific about details they shared.]
 
 CANDIDATE STRENGTHS:
-- [Key strength 1]
-- [Key strength 2]
-- [Key strength 3]
-(List 2-4 clear strengths based on the conversation)
+- [List 4-7 specific strengths demonstrated by the candidate. Include concrete examples from the conversation where possible. Consider: relevant experience, technical skills, soft skills, communication quality, enthusiasm, professionalism, work ethic indicators, education, certifications, or other positive attributes they demonstrated. Be specific and detailed.]
 
-AREAS OF CONCERN:
-- [Concern 1]
-- [Concern 2]
-(List any gaps or concerns. If none, write "No significant concerns noted.")
+CANDIDATE WEAKNESSES:
+- [List 2-5 concerns, gaps, or areas for improvement you identified. Consider: lack of required experience, communication issues, missing qualifications, concerns about fit, red flags, gaps in information, areas where they could improve, or skills they may need to develop. Be honest but professional. If truly no concerns exist, you may state "No significant concerns identified during initial conversation" but try to find at least 1-2 developmental areas.]
 
-FIT SCORE: [X]/100
-[Give a numerical score from 0-100 based on:
-- Communication quality (0-25): How well did the candidate communicate?
-- Engagement level (0-25): How engaged and interested was the candidate?
-- Qualification match (0-25): Based on what was discussed, how qualified do they seem?
-- Overall impression (0-25): Professional demeanor, enthusiasm, clarity]
-
-HIRING RECOMMENDATION:
-[One sentence: Strong Fit (80-100) / Good Fit (60-79) / Moderate Fit (40-59) / Not Recommended (<40) - with brief justification]
+OVERALL IMPRESSION:
+[Write 2-4 sentences giving a thoughtful overall assessment. Include: your recommendation (e.g., "Strong candidate", "Promising candidate with some concerns", "Recommend proceeding to next round"), key reasons for your recommendation, any next steps or additional information needed, and overall fit for the role. Be balanced and professional.]
 """
     
     try:
@@ -213,15 +209,29 @@ HIRING RECOMMENDATION:
         return summary_data
         
     except Exception as e:
-        logger.error(f"Error generating LLM summary: {e}")
-        # Fallback to basic summary
+        logger.error(f"Error generating LLM summary: {e}", exc_info=True)
+        # Fallback to basic summary with more detail
         user_messages = [m for m in messages if m.get('MsgCreator') == 'User']
+        agent_messages = [m for m in messages if m.get('MsgCreator') != 'User']
+        
+        # Try to extract some basic insights even without LLM
+        user_text = " ".join([m.get('MsgContent', '') for m in user_messages]).lower()
+        basic_strengths = ["Participated in the application conversation"]
+        if len(user_messages) >= 10:
+            basic_strengths.append("Engaged actively with multiple responses")
+        if any(word in user_text for word in ['experience', 'worked', 'years', 'position']):
+            basic_strengths.append("Discussed work experience during conversation")
+        if any(word in user_text for word in ['skills', 'able', 'can', 'knowledge']):
+            basic_strengths.append("Mentioned relevant skills or capabilities")
+            
         return {
-            "discussion_summary": f"Conversation with {len(messages)} messages exchanged.",
-            "strengths": ["Engaged in the application process"],
-            "weaknesses": ["Unable to perform detailed analysis"],
-            "fit_score": 50,
-            "overall_impression": "Manual review recommended.",
+            "discussion_summary": f"Conversation included {len(messages)} total messages with {len(user_messages)} candidate responses and {len(agent_messages)} interviewer messages. The candidate participated in the application process and responded to questions. Due to a technical issue, detailed AI analysis could not be performed - manual review of the full conversation transcript is strongly recommended.",
+            "strengths": basic_strengths,
+            "weaknesses": [
+                "Automated detailed analysis was not available for this conversation",
+                "Comprehensive assessment requires manual transcript review"
+            ],
+            "overall_impression": "Manual review required. The conversation was completed but detailed AI-powered analysis encountered an error. Please review the full conversation transcript to properly assess this candidate's qualifications and fit for the position.",
         }
 
 
@@ -269,16 +279,34 @@ def _parse_llm_summary(response_text: str) -> Dict[str, Any]:
             # Add content to current section
             if current_section == 'summary' and not result["discussion_summary"]:
                 result["discussion_summary"] = line
-            elif current_section == 'strengths' and line.startswith('-'):
-                result["strengths"].append(line[1:].strip())
-            elif current_section == 'weaknesses' and line.startswith('-'):
-                result["weaknesses"].append(line[1:].strip())
-            elif current_section == 'fit_score' and result["fit_score"] is None:
-                # Try to extract score from continuation line
-                import re
-                score_match = re.search(r'(\d+)\s*/?\s*100?', line)
-                if score_match:
-                    result["fit_score"] = int(score_match.group(1))
+            elif current_section == 'strengths':
+                # Handle bullet points, numbered lists, or plain text
+                if line.startswith(('-', '•', '*')):
+                    result["strengths"].append(line[1:].strip())
+                elif line and line[0].isdigit() and ('. ' in line or ') ' in line):
+                    # Handle numbered lists like "1. " or "1) "
+                    strength = line.split('. ', 1)[-1].split(') ', 1)[-1].strip()
+                    if strength and len(strength) > 3:
+                        result["strengths"].append(strength)
+                elif not line.startswith(('(', '[')) and len(line) > 10:
+                    # Standalone text - might be a continuation or new item
+                    if result["strengths"] and not any(line.startswith(x) for x in ['-', '•', '*']):
+                        result["strengths"][-1] += " " + line
+                    else:
+                        result["strengths"].append(line)
+            elif current_section == 'weaknesses':
+                # Handle bullet points, numbered lists, or plain text
+                if line.startswith(('-', '•', '*')):
+                    result["weaknesses"].append(line[1:].strip())
+                elif line and line[0].isdigit() and ('. ' in line or ') ' in line):
+                    weakness = line.split('. ', 1)[-1].split(') ', 1)[-1].strip()
+                    if weakness and len(weakness) > 3:
+                        result["weaknesses"].append(weakness)
+                elif not line.startswith(('(', '[')) and len(line) > 10:
+                    if result["weaknesses"] and not any(line.startswith(x) for x in ['-', '•', '*']):
+                        result["weaknesses"][-1] += " " + line
+                    else:
+                        result["weaknesses"].append(line)
             elif current_section == 'impression' and not result["overall_impression"]:
                 result["overall_impression"] = line
             elif current_section == 'summary':
@@ -288,15 +316,20 @@ def _parse_llm_summary(response_text: str) -> Dict[str, Any]:
     
     # Ensure we have at least some default values
     if not result["discussion_summary"]:
-        result["discussion_summary"] = "Application conversation completed."
+        result["discussion_summary"] = "Candidate completed the application conversation. The discussion covered basic application questions and information gathering. Further detailed review of their responses is recommended to assess full qualifications and fit for the position."
     if not result["strengths"]:
-        result["strengths"] = ["Completed the application process"]
+        result["strengths"] = [
+            "Engaged with the application process",
+            "Responded to questions during the conversation",
+            "Completed the required information gathering"
+        ]
     if not result["weaknesses"]:
-        result["weaknesses"] = ["No significant concerns noted"]
-    if result["fit_score"] is None:
-        result["fit_score"] = 50  # Default moderate score
+        result["weaknesses"] = [
+            "Limited detail provided in conversation responses",
+            "Unable to perform comprehensive analysis from available conversation data"
+        ]
     if not result["overall_impression"]:
-        result["overall_impression"] = "Review recommended."
+        result["overall_impression"] = "Manual review recommended to conduct more thorough assessment. Additional information may be needed to make a final hiring decision."
     
     return result
 
@@ -356,7 +389,6 @@ def _generate_pdf_from_data(application_data: Dict[str, Any]) -> bytes:
     # Session info
     elements.append(Paragraph(f"Session ID: {application_data.get('session_id', 'N/A')}", normal_style))
     elements.append(Paragraph(f"Generated: {application_data.get('timestamp', datetime.utcnow().isoformat())}", normal_style))
-    elements.append(Paragraph(f"Status: {application_data.get('status', 'N/A')}", normal_style))
     elements.append(Spacer(1, 12))
     
     # Applicant Information
@@ -582,92 +614,101 @@ async def get_application_pdf(session_id: int):
         raise HTTPException(status_code=500, detail=f"Failed to generate PDF: {str(e)}")
 
 
-@router.get("", response_model=List[ApplicationSummary])
-async def list_applications(session_ids: Optional[str] = None, limit: int = 100, offset: int = 0):
-    """
-    List applications by fetching each session by ID from Xano
+# @router.get("", response_model=List[ApplicationSummary])
+# async def list_applications(session_ids: Optional[str] = None, limit: int = 100, offset: int = 0):
+#     """
+#     List applications by fetching each session by ID from Xano
     
-    Args:
-        session_ids: Comma-separated list of Xano session IDs to fetch (e.g., "1,2,3")
-        limit: Maximum number of applications to return
-        offset: Number of applications to skip
-    """
-    try:
-        xano_client = get_xano_client()
-        applications = []
+#     Args:
+#         session_ids: Comma-separated list of Xano session IDs to fetch (e.g., "1,2,3")
+#         limit: Maximum number of applications to return
+#         offset: Number of applications to skip
+#     """
+#     try:
+#         xano_client = get_xano_client()
+#         applications = []
         
-        if session_ids:
-            # Parse session IDs from comma-separated string
-            try:
-                ids = [int(sid.strip()) for sid in session_ids.split(",") if sid.strip()]
-            except ValueError:
-                raise HTTPException(status_code=400, detail="Invalid session_ids format. Use comma-separated integers.")
+#         if session_ids:
+#             # Parse session IDs from comma-separated string
+#             try:
+#                 ids = [int(sid.strip()) for sid in session_ids.split(",") if sid.strip()]
+#             except ValueError:
+#                 raise HTTPException(status_code=400, detail="Invalid session_ids format. Use comma-separated integers.")
             
-            # Fetch each session by ID
-            for sid in ids[offset:offset + limit]:
-                session = xano_client.get_session_by_id(sid)
-                if session:
-                    app_summary = _build_application_summary(session, xano_client)
-                    applications.append(app_summary)
-        else:
-            # Get all sessions if no specific IDs provided
-            sessions = xano_client.get_sessions() or []
-            for session in sessions[offset:offset + limit]:
-                app_summary = _build_application_summary(session, xano_client)
-                applications.append(app_summary)
+#             # Fetch each session by ID
+#             for sid in ids[offset:offset + limit]:
+#                 session = xano_client.get_session_by_id(sid)
+#                 if session:
+#                     app_summary = _build_application_summary(session, xano_client)
+#                     applications.append(app_summary)
+#         else:
+#             # Get all sessions if no specific IDs provided
+#             sessions = xano_client.get_sessions() or []
+#             for session in sessions[offset:offset + limit]:
+#                 app_summary = _build_application_summary(session, xano_client)
+#                 applications.append(app_summary)
         
-        return applications
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error listing applications: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to list applications: {str(e)}")
+#         return applications
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"Error listing applications: {e}")
+#         raise HTTPException(status_code=500, detail=f"Failed to list applications: {str(e)}")
 
 
-def _build_application_summary(session: Dict[str, Any], xano_client) -> ApplicationSummary:
-    """
-    Build application summary from session data.
-    Session contains: candidate_name, candidate_email, candidate_phone, fit_score, job_id, Status, etc.
-    No candidate table lookup needed.
-    """
-    session_id = session.get('id')
-    applicant_name = session.get('candidate_name')
-    applicant_email = session.get('candidate_email')
-    fit_score = session.get('fit_score')
-    rating = None
-    job_title = None
-    company = None
+# def _build_application_summary(session: Dict[str, Any], xano_client) -> ApplicationSummary:
+#     """
+#     Build application summary from session data.
+#     Session only has: candidate_id and Status.
+#     Candidate has: Name, Score, Email, Phone, job_id, company_id, Status, etc.
+#     """
+#     session_id = session.get('id')
+#     candidate_id = session.get('candidate_id')
+#     applicant_name = None
+#     applicant_email = None
+#     fit_score = None
+#     rating = None
+#     job_title = None
+#     company = None
     
-    if fit_score is not None:
-        rating = _get_rating_from_score(fit_score)
+#     # Get candidate info if linked - candidate has job_id and company_id
+#     if candidate_id:
+#         candidate = xano_client.get_candidate_by_id(candidate_id)
+#         if candidate:
+#             applicant_name = candidate.get('Name')
+#             applicant_email = candidate.get('Email')
+#             fit_score = candidate.get('Score')
+#             if fit_score is not None:
+#                 rating = _get_rating_from_score(fit_score)
+            
+#             # Get job info using job_id from candidate (not session)
+#             job_id = candidate.get('job_id')
+#             if job_id:
+#                 job = xano_client.get_job_by_id(job_id)
+#                 if job:
+#                     job_title = job.get('job_title')
+#                     company = job.get('company')
+            
+#             # If no company from job, try to get from company_id
+#             if not company:
+#                 company_id = candidate.get('company_id')
+#                 if company_id:
+#                     company_data = xano_client.get_company_by_id(company_id)
+#                     if company_data:
+#                         company = company_data.get('name', company_data.get('company_name'))
     
-    # Get job info using job_id from session
-    job_id = session.get('job_id')
-    if job_id:
-        job = xano_client.get_job_by_id(job_id)
-        if job:
-            job_title = job.get('job_title')
-            company = job.get('company')
-    
-    # If no company from job, try to get from company_id in session
-    if not company:
-        company_id = session.get('company_id')
-        if company_id:
-            company_data = xano_client.get_company_by_id(company_id)
-            if company_data:
-                company = company_data.get('name', company_data.get('company_name'))
-    
-    return ApplicationSummary(
-        session_id=session_id,
-        timestamp=session.get('created_at'),
-        applicant_name=applicant_name,
-        applicant_email=applicant_email,
-        job_title=job_title,
-        company=company,
-        status=session.get('Status', 'unknown'),
-        fit_score=fit_score,
-        rating=rating,
-    )
+#     return ApplicationSummary(
+#         session_id=session_id,
+#         candidate_id=candidate_id,
+#         timestamp=session.get('created_at'),
+#         applicant_name=applicant_name,
+#         applicant_email=applicant_email,
+#         job_title=job_title,
+#         company=company,
+#         status=session.get('Status', 'unknown'),
+#         fit_score=fit_score,
+#         rating=rating,
+#     )
 
 
 @router.post("/{session_id}/calculate_fit_score")
