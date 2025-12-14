@@ -14,6 +14,7 @@ from chatbot.utils.job_fetcher import get_job_by_id
 from chatbot.utils.utils import setup_logging
 from chatbot.utils.xano_client import get_xano_client
 from chatbot.utils.session_manager import get_session_manager
+from chatbot.utils.question_generator import generate_questions_from_job_details
 
 logger = setup_logging()
 router = APIRouter(prefix="/api/v1/sessions", tags=["Sessions"])
@@ -95,11 +96,22 @@ async def create_session(request: SessionCreateRequest):
         
         # Fetch job details if job_id is provided
         job_details = None
+        generated_questions = None
         if request.job_id:
             job_details = get_job_by_id(request.job_id)
+            print(job_details)
+            print("-----"*4)
             if not job_details:
                 logger.warning(f"Job ID {request.job_id} not found")
+            else:
+                # Generate questions from job details
+                try:
+                    generated_questions = await generate_questions_from_job_details(job_details, num_questions=15)
+                    logger.info(f"Generated {len(generated_questions)} questions for job {request.job_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to generate questions for job {request.job_id}: {e}")
 
+        
         # Create agent with job_id in memory
         agent = get_or_create_agent(session_id, job_id=request.job_id)
 
@@ -110,6 +122,7 @@ async def create_session(request: SessionCreateRequest):
         if request.job_id:
             agent.session_state.engagement.job_id = request.job_id
             agent.session_state.engagement.job_details = job_details
+            agent.session_state.engagement.generated_questions = generated_questions
 
         if request.language:
             agent.session_state.engagement.language = request.language

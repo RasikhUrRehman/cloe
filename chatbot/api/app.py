@@ -4,7 +4,6 @@ Provides REST API endpoints for chat interactions
 """
 import os
 from datetime import datetime
-from typing import Any, Dict
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,7 +11,6 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from chatbot.core.agent import CleoRAGAgent
 from chatbot.utils.config import ensure_directories, settings
 from chatbot.utils.utils import setup_logging
 from chatbot.utils.session_manager import get_session_manager
@@ -21,8 +19,7 @@ from chatbot.utils.session_manager import get_session_manager
 from chatbot.api.routes import (
     chat_router,
     sessions_router,
-    applications_router,
-    questions_router,
+    applications_router
 )
 
 # Initialize logging
@@ -55,7 +52,6 @@ logger.info("Session manager initialized")
 app.include_router(chat_router)
 app.include_router(sessions_router)
 app.include_router(applications_router)
-app.include_router(questions_router)
 
 
 # Health check models

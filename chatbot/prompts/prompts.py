@@ -409,6 +409,7 @@ Query for specific verification requirements, timelines, and next steps.
         current_stage: ConversationStage,
         language: str = "en",
         job_context: str = "",
+        generated_questions: list = None,
     ) -> str:
         """
         Get the complete system prompt for the current stage
@@ -417,6 +418,7 @@ Query for specific verification requirements, timelines, and next steps.
             current_stage: Current conversation stage
             language: Language code (en, es, etc.)
             job_context: Job details context (if available)
+            generated_questions: AI-generated interview questions to ask
         Returns:
             Complete system prompt with stage-specific instructions
         """
@@ -451,6 +453,28 @@ ASSESSMENT APPROACH:
 - Be honest but encouraging about their fit for the role
 """
             base_prompt = base_prompt + job_instructions
+        
+        # Add generated questions if available
+        if generated_questions:
+            questions_text = "\n".join([f"   {i+1}. {q.get('question', '')} (Type: {q.get('type', 'general')})" for i, q in enumerate(generated_questions)])
+            questions_instructions = f"""
+🎯 INTERVIEW QUESTIONS TO ASK:
+The following questions have been specifically generated for this job position based on its requirements.
+USE THESE QUESTIONS naturally during the conversation, especially during the QUALIFICATION and APPLICATION stages:
+
+{questions_text}
+
+IMPORTANT INSTRUCTIONS FOR USING THESE QUESTIONS:
+1. Ask these questions NATURALLY within the conversation flow - don't just list them all at once
+2. Use them during the QUALIFICATION stage for eligibility and experience questions
+3. Use them during the APPLICATION stage for deeper skill and background assessment
+4. Adapt the wording to match your conversational tone
+5. Don't reveal that these are pre-generated - make them feel spontaneous
+6. You don't need to ask ALL questions - prioritize based on relevance to the candidate's responses
+7. The questions are categorized by type (technical, behavioral, situational, experience) - use them appropriately
+"""
+            base_prompt = base_prompt + questions_instructions
+        
         stage_prompt = cls.STAGE_PROMPTS.get(
             current_stage,
             "Continue the conversation naturally and guide the applicant appropriately.",

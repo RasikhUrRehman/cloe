@@ -3,7 +3,7 @@ Conversation State Management
 Defines state models for conversation tracking
 """
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 from chatbot.utils.utils import (
     generate_session_id,
@@ -26,6 +26,7 @@ class EngagementState(BaseModel):
     company_id: Optional[str] = None
     job_id: Optional[str] = None
     job_details: Optional[Dict[str, Any]] = None  # Full job details from API
+    generated_questions: Optional[List[Dict[str, str]]] = None  # AI-generated interview questions
     language: str = "en"
     stage_completed: bool = False
     xano_session_id: Optional[int] = None  # Xano backend session ID

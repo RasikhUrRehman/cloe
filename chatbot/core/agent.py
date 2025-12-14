@@ -153,12 +153,17 @@ class CleoRAGAgent:
         job_context = ""
         if self.session_state.engagement and self.session_state.engagement.job_details:
             job_context = format_job_details(self.session_state.engagement.job_details)
+        # Get generated questions if available
+        generated_questions = None
+        if self.session_state.engagement and self.session_state.engagement.generated_questions:
+            generated_questions = self.session_state.engagement.generated_questions
         # Use CleoPrompts to get the complete system prompt
         return CleoPrompts.get_system_prompt(
             session_id=self.session_state.session_id,
             current_stage=self.session_state.current_stage,
             language=language,
             job_context=job_context,
+            generated_questions=generated_questions,
         )
     def _refresh_agent_with_job_context(self):
         """Refresh the agent with updated job context"""
