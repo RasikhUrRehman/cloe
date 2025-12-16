@@ -29,7 +29,7 @@ const sessionIdDisplay = document.getElementById('sessionIdDisplay');
 const currentStageDisplay = document.getElementById('currentStage');
 const apiStatus = document.getElementById('apiStatus');
 const newSessionButton = document.getElementById('newSessionButton');
-const resetButton = document.getElementById('resetButton');
+// const resetButton = document.getElementById('resetButton');
 
 // Job selection elements
 const jobsLoadingIndicator = document.getElementById('jobsLoadingIndicator');
@@ -646,7 +646,7 @@ function stopStatusUpdates() {
 startButton.addEventListener('click', handleStartConversation);
 chatForm.addEventListener('submit', handleSendMessage);
 newSessionButton.addEventListener('click', handleNewSession);
-resetButton.addEventListener('click', handleResetSession);
+// resetButton.addEventListener('click', handleResetSession);
 jobSelect.addEventListener('change', handleJobSelection);
 refreshJobsButton.addEventListener('click', loadJobs);
 

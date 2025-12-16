@@ -106,7 +106,7 @@ body {
 /* Job Selection Styles */
 .job-selection-container {
     margin: 2rem auto;
-    max-width: 600px;
+    max-width: 800px;
     padding: 1.5rem;
     background: var(--surface-color);
     border-radius: 12px;

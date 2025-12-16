@@ -33,7 +33,7 @@
                 </div>
                 
                 <!-- Job Selection Section -->
-                <div class="job-selection-container">
+                <div style="max-width: 800px !important;" class="job-selection-container">
                     <h3 class="job-selection-title">Select a Job Position (Optional)</h3>
                     <div id="jobsLoadingIndicator" class="jobs-loading" style="display: none;">
                         <div class="loading-spinner"></div>
@@ -72,37 +72,12 @@
             </div>
 
             <div class="status-container">
-                <div class="status-section">
-                    <h3>Current Stage</h3>
-                    <div id="currentStage" class="stage-badge">Initializing...</div>
-                </div>
+                
                 
                 <!-- Job Information Section -->
                 <div class="status-section" id="jobInfoSection" style="display: none;">
                     <h3>Job Position</h3>
                     <div id="jobInfo" class="job-info-display"></div>
-                </div>
-
-                <div class="status-section">
-                    <h3>Progress</h3>
-                    <div class="progress-list">
-                        <div class="progress-item" id="engagementProgress">
-                            <div class="progress-icon">○</div>
-                            <div class="progress-label">Engagement</div>
-                        </div>
-                        <div class="progress-item" id="qualificationProgress">
-                            <div class="progress-icon">○</div>
-                            <div class="progress-label">Qualification</div>
-                        </div>
-                        <div class="progress-item" id="applicationProgress">
-                            <div class="progress-icon">○</div>
-                            <div class="progress-label">Application</div>
-                        </div>
-                        <div class="progress-item" id="verificationProgress">
-                            <div class="progress-icon">○</div>
-                            <div class="progress-label">Verification</div>
-                        </div>
-                    </div>
                 </div>
 
                 <div class="status-section">
@@ -116,7 +91,7 @@
 
             <div class="sidebar-actions">
                 <button id="newSessionButton" class="action-button secondary">New Session</button>
-                <button id="resetButton" class="action-button secondary">Reset Chat</button>
+                <!-- <button id="resetButton" class="action-button secondary">Reset Chat</button> -->
             </div>
         </div>
 
