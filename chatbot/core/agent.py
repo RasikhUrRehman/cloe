@@ -717,19 +717,21 @@ class CleoRAGAgent:
             # Extract application information using simple patterns
             if self._extract_application_info(user_message, app):
                 state_changed = True
-            # Check if application is complete and trigger fit score calculation
+            # Check if application is complete and trigger fit score calculation + candidate creation
             if self._is_application_complete(app):
                 if not app.stage_completed:
                     app.application_status = "submitted"
                     app.stage_completed = True
                     # Calculate fit score and save application
                     self._calculate_and_save_fit_score()
-                    # Transition to verification/completed stage
-                    self.session_state.current_stage = ConversationStage.COMPLETED
-                    self._update_xano_status(ConversationStage.COMPLETED)
+                    # Create candidate immediately upon application completion
+                    self._create_candidate_immediately()
+                    # Transition to verification stage to prompt for verification
+                    self.session_state.current_stage = ConversationStage.VERIFICATION
+                    self._update_xano_status(ConversationStage.VERIFICATION)
                     state_changed = True
                     logger.info(
-                        "Application completed - Fit score calculated - Moving to COMPLETED stage"
+                        "Application completed - Candidate created - Moving to VERIFICATION stage for contact verification"
                     )
         # Verification stage updates
         elif self.session_state.current_stage == ConversationStage.VERIFICATION:
@@ -1045,6 +1047,31 @@ class CleoRAGAgent:
             import traceback
             traceback.print_exc()
             # Don't let fit score calculation failure prevent state progression
+
+    def _create_candidate_immediately(self):
+        """
+        Create the candidate record immediately when application is complete.
+        This is triggered automatically, not by user saying goodbye.
+        """
+        try:
+            logger.info("Creating candidate immediately upon application completion...")
+            
+            # Ensure candidate is created using the toolkit's method
+            candidate_id = self.toolkit._ensure_candidate_created()
+            
+            if candidate_id:
+                logger.info(f"Candidate created successfully: {candidate_id}")
+                return candidate_id
+            else:
+                logger.warning("Failed to create candidate during application completion")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error creating candidate immediately: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
     def get_conversation_summary(self) -> Dict[str, Any]:
         """Get summary of current conversation state"""
         app_complete = (

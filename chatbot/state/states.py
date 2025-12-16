@@ -74,6 +74,16 @@ class VerificationState(BaseModel):
     timestamp_verified: Optional[str] = None
     data_signature: Optional[str] = None
     stage_completed: bool = False
+    # Email verification fields
+    email_verification_user_id: Optional[int] = None
+    email_verification_code: Optional[str] = None
+    email_for_verification: Optional[str] = None
+    email_verified: bool = False
+    # Phone verification fields
+    phone_verification_user_id: Optional[int] = None
+    phone_verification_code: Optional[str] = None
+    phone_for_verification: Optional[str] = None
+    phone_verified: bool = False
     class Config:
         use_enum_values = True
 class SessionState(BaseModel):

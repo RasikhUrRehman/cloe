@@ -6,6 +6,7 @@ Uses LangChain's StructuredTool with closure to avoid global state.
 import os
 import re
 import uuid
+import requests
 from typing import TYPE_CHECKING, List, Optional
 from langchain.tools import StructuredTool
 
@@ -562,6 +563,243 @@ class AgentToolkit:
             logger.error(f"Error concluding session: {e}")
             return f"Session ended with note: {reason}"
     
+    def _ensure_candidate_created(self) -> Optional[int]:
+        """
+        Ensure candidate is created for this session before verification.
+        If candidate doesn't exist yet, create it now.
+        
+        Returns:
+            Candidate ID if created or already exists, None if creation failed
+        """
+        # Check if candidate already exists for this session
+        if self.session_state.engagement and self.session_state.engagement.candidate_id:
+            logger.info(f"Candidate already exists: {self.session_state.engagement.candidate_id}")
+            return self.session_state.engagement.candidate_id
+        
+        # Candidate doesn't exist, so create it now
+        logger.info("Candidate not yet created. Creating candidate now before verification...")
+        
+        try:
+            # Calculate fit score
+            fit_score = self._calculate_fit_score()
+            
+            # Generate PDF report
+            pdf_path = self._generate_pdf_report(fit_score)
+            
+            # Create candidate
+            candidate_id = self._create_candidate_on_conclude(fit_score, pdf_path)
+            
+            if candidate_id:
+                logger.info(f"Candidate created successfully: {candidate_id}")
+                return candidate_id
+            else:
+                logger.warning("Failed to create candidate")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error ensuring candidate creation: {e}")
+            return None
+    
+    def send_email_verification_code(self, email: str) -> str:
+        """
+        Send email verification code to the candidate.
+        First ensures candidate is created, then sends verification code.
+        
+        Args:
+            email: Email address to send verification code to
+            
+        Returns:
+            Message indicating success or failure, and stores user_id and code for later validation
+        """
+        try:
+            # Ensure candidate is created before verification
+            candidate_id = self._ensure_candidate_created()
+            if not candidate_id:
+                logger.warning("Cannot send email verification code: candidate could not be created")
+                return "✗ Unable to prepare verification. Please complete your application first."
+            
+            # Call Xano API to send email code
+            url = "https://xoho-w3ng-km3o.n7e.xano.io/api:QMW9Va2W/Send_Code_to_Email"
+            payload = {"email": email}
+            
+            response = requests.post(url, json=payload, timeout=self.xano_client.timeout)
+            response.raise_for_status()
+            
+            result = response.json()
+            user_id = result.get('id')
+            email_code = result.get('EmailCode')
+            
+            # Store verification state for this session
+            if not self.session_state.verification:
+                from chatbot.state.states import VerificationState
+                self.session_state.verification = VerificationState(session_id=self.session_state.session_id)
+            
+            self.session_state.verification.email_verification_user_id = user_id
+            self.session_state.verification.email_verification_code = email_code
+            self.session_state.verification.email_for_verification = email
+            
+            logger.info(f"Email verification code sent to {email}, user_id: {user_id}, candidate_id: {candidate_id}")
+            return f"✓ Verification code sent to {email}. Please check your email and enter the code when ready."
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error sending email verification code: {e}")
+            return f"✗ Failed to send verification code to {email}. Please try again."
+        except Exception as e:
+            logger.error(f"Unexpected error sending email verification code: {e}")
+            return f"✗ An error occurred while sending verification code. Please try again."
+
+    def validate_email_verification(self, user_id: int, code: str) -> str:
+        """
+        Validate email verification code provided by user.
+        First ensures candidate is created, then validates the code.
+        
+        Args:
+            user_id: User ID from previous email send
+            code: Verification code entered by user
+            
+        Returns:
+            Message indicating if verification was successful
+        """
+        try:
+            # Ensure candidate is created before validation
+            candidate_id = self._ensure_candidate_created()
+            if not candidate_id:
+                logger.warning("Cannot validate email verification code: candidate could not be created")
+                return "✗ Unable to complete verification. Please complete your application first."
+            
+            # Call Xano API to validate email code
+            url = "https://xoho-w3ng-km3o.n7e.xano.io/api:QMW9Va2W/ValidateEmail"
+            payload = {"user_id": user_id, "Code": code}
+            
+            response = requests.post(url, json=payload, timeout=self.xano_client.timeout)
+            response.raise_for_status()
+            
+            result = response.json()
+            email_verified = result.get('EmailVerification', False)
+            
+            if email_verified:
+                # Update verification state
+                if not self.session_state.verification:
+                    from chatbot.state.states import VerificationState
+                    self.session_state.verification = VerificationState(session_id=self.session_state.session_id)
+                
+                self.session_state.verification.email_verified = True
+                logger.info(f"Email verified successfully for user_id: {user_id}, candidate_id: {candidate_id}")
+                return "✓ Email verified successfully!"
+            else:
+                logger.warning(f"Email verification failed for user_id: {user_id}")
+                return "✗ Email verification failed. Please check the code and try again."
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error validating email verification code: {e}")
+            return f"✗ Verification failed. Please try again."
+        except Exception as e:
+            logger.error(f"Unexpected error validating email verification: {e}")
+            return f"✗ An error occurred during verification. Please try again."
+
+    def send_phone_verification_code(self, phone: str) -> str:
+        """
+        Send phone verification code to the candidate.
+        First ensures candidate is created, then sends verification code.
+        
+        Args:
+            phone: Phone number to send verification code to
+            
+        Returns:
+            Message indicating success or failure, and stores user_id and code for later validation
+        """
+        try:
+            # Ensure candidate is created before verification
+            candidate_id = self._ensure_candidate_created()
+            if not candidate_id:
+                logger.warning("Cannot send phone verification code: candidate could not be created")
+                return "✗ Unable to prepare verification. Please complete your application first."
+            
+            # Call Xano API to send phone code (using email as identifier)
+            url = "https://xoho-w3ng-km3o.n7e.xano.io/api:QMW9Va2W/Send_Code_to_Phone"
+            # The API expects email parameter based on the notebook example
+            if self.session_state.application and self.session_state.application.email:
+                email = self.session_state.application.email
+            else:
+                return "✗ Email not found in session. Please provide email first."
+            
+            payload = {"email": email}
+            
+            response = requests.post(url, json=payload, timeout=self.xano_client.timeout)
+            response.raise_for_status()
+            
+            result = response.json()
+            user_id = result.get('id')
+            phone_code = result.get('PhoneCode')
+            
+            # Store verification state for this session
+            if not self.session_state.verification:
+                from chatbot.state.states import VerificationState
+                self.session_state.verification = VerificationState(session_id=self.session_state.session_id)
+            
+            self.session_state.verification.phone_verification_user_id = user_id
+            self.session_state.verification.phone_verification_code = phone_code
+            self.session_state.verification.phone_for_verification = phone
+            
+            logger.info(f"Phone verification code sent, user_id: {user_id}, candidate_id: {candidate_id}")
+            return f"✓ Verification code sent to {phone}. Please enter the code when ready."
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error sending phone verification code: {e}")
+            return f"✗ Failed to send verification code to {phone}. Please try again."
+        except Exception as e:
+            logger.error(f"Unexpected error sending phone verification code: {e}")
+            return f"✗ An error occurred while sending verification code. Please try again."
+
+    def validate_phone_verification(self, user_id: int, code: str) -> str:
+        """
+        Validate phone verification code provided by user.
+        First ensures candidate is created, then validates the code.
+        
+        Args:
+            user_id: User ID from previous phone send
+            code: Verification code entered by user
+            
+        Returns:
+            Message indicating if verification was successful
+        """
+        try:
+            # Ensure candidate is created before validation
+            candidate_id = self._ensure_candidate_created()
+            if not candidate_id:
+                logger.warning("Cannot validate phone verification code: candidate could not be created")
+                return "✗ Unable to complete verification. Please complete your application first."
+            
+            # Call Xano API to validate phone code
+            url = "https://xoho-w3ng-km3o.n7e.xano.io/api:QMW9Va2W/ValidatePhoneVerification"
+            payload = {"user_id": user_id, "Code": code}
+            
+            response = requests.post(url, json=payload, timeout=self.xano_client.timeout)
+            response.raise_for_status()
+            
+            result = response.json()
+            phone_verified = result.get('Phone_Verification', False)
+            
+            if phone_verified:
+                # Update verification state
+                if not self.session_state.verification:
+                    from chatbot.state.states import VerificationState
+                    self.session_state.verification = VerificationState(session_id=self.session_state.session_id)
+                
+                self.session_state.verification.phone_verified = True
+                logger.info(f"Phone verified successfully for user_id: {user_id}, candidate_id: {candidate_id}")
+                return "✓ Phone verified successfully!"
+            else:
+                logger.warning(f"Phone verification failed for user_id: {user_id}")
+                return "✗ Phone verification failed. Please check the code and try again."
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error validating phone verification code: {e}")
+            return f"✗ Verification failed. Please try again."
+        except Exception as e:
+            logger.error(f"Unexpected error validating phone verification: {e}")
+            return f"✗ An error occurred during verification. Please try again."
+
     def get_tools(self) -> List[StructuredTool]:
         """
         Get all tools bound to this toolkit's session state.
@@ -574,6 +812,42 @@ class AgentToolkit:
                 func=self.save_state,
                 name="save_state",
                 description="Save the current conversation state to persistent storage. Use this to save key conversation milestones like when user starts application, shares resume, or agrees to proceed.",
+            ),
+            StructuredTool.from_function(
+                func=self.send_email_verification_code,
+                name="send_email_verification_code",
+                description=(
+                    "Send email verification code to candidate. Call this after asking if user is available for email verification. "
+                    "The system will send a verification code to their email and store it for later validation. "
+                    "Input: candidate's email address."
+                ),
+            ),
+            StructuredTool.from_function(
+                func=self.validate_email_verification,
+                name="validate_email_verification",
+                description=(
+                    "Validate the email verification code provided by the user. Call this after user enters the code they received. "
+                    "If code is valid, email is marked as verified. "
+                    "Input: user_id (from email send response) and the 6-digit code user provided."
+                ),
+            ),
+            StructuredTool.from_function(
+                func=self.send_phone_verification_code,
+                name="send_phone_verification_code",
+                description=(
+                    "Send phone verification code to candidate. Call this after asking if user is available for phone verification. "
+                    "The system will send a verification code to their phone and store it for later validation. "
+                    "Input: candidate's phone number."
+                ),
+            ),
+            StructuredTool.from_function(
+                func=self.validate_phone_verification,
+                name="validate_phone_verification",
+                description=(
+                    "Validate the phone verification code provided by the user. Call this after user enters the code they received. "
+                    "If code is valid, phone is marked as verified. "
+                    "Input: user_id (from phone send response) and the 6-digit code user provided."
+                ),
             ),
             StructuredTool.from_function(
                 func=self.conclude_session,
