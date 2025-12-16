@@ -62,17 +62,6 @@ class HealthResponse(BaseModel):
     timestamp: str
 
 
-@app.get("/", response_model=HealthResponse)
-@app.head("/")
-def read_root() -> HealthResponse:
-    """Health endpoint that supports GET and HEAD on root path"""
-    return HealthResponse(
-        status="ok",
-        version=settings.APP_VERSION,
-        timestamp=datetime.utcnow().isoformat(),
-    )
-
-
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """Health check endpoint"""
@@ -86,11 +75,23 @@ async def health_check():
 # Serve web UI
 WEB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "web")
 
+@app.get("/")
+async def serve_root():
+    """Serve the web UI from root path"""
+    index_path = os.path.join(WEB_DIR, "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path, media_type="text/html")
+    else:
+        return {"message": "Web UI not found", "status": "error"}
+
 @app.get("/ui")
 async def serve_ui():
-    """Serve the web UI"""
-    return FileResponse(os.path.join(WEB_DIR, "index.html"))
-
+    """Serve the web UI at /ui endpoint"""
+    index_path = os.path.join(WEB_DIR, "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path, media_type="text/html")
+    else:
+        return {"message": "Web UI not found", "status": "error"}
 
 # Mount static files for web UI (CSS, JS)
 if os.path.exists(WEB_DIR):

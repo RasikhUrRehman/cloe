@@ -344,7 +344,7 @@ class AgentToolkit:
             prompt = ( 
                 "You are a strict JSON extractor. Given the following conversation transcript between an agent and a user, extract the candidate's full name, email address, and phone number. \n"
                 "IMPORTANT INSTRUCTIONS:\n"
-                "- full_name: Extract BOTH first name AND last name. If only one name is mentioned, extract it but note it's incomplete.\n"
+                "- full_name: Extract BOTH first name AND last name. If only one name is mentioned, then ask to give full name. And judge with NER that it is a name and then store.\n"
                 "- email: Extract the complete email address with proper format (username@domain.extension). Skip if format is invalid.\n"
                 "- phone: Extract the phone number with all digits.\n"
                 "Return ONLY valid JSON with the exact keys: full_name, email, phone. Use null for missing fields and don't output any other text. If multiple values are present, use the most recent values.\n"

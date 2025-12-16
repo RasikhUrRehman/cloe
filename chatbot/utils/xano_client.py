@@ -584,7 +584,7 @@ class XanoClient:
         name: str,
         email: Optional[str] = None,
         phone: Optional[str] = None,
-        score: Optional[float] = None,
+        score: Optional[float] = 0,
         file_path: Optional[str] = None,
         job_id: Optional[str] = None,
         company_id: Optional[str] = None,

@@ -1,5 +1,6 @@
 // Configuration
-const API_BASE_URL = 'http://localhost:8000';
+//const API_BASE_URL = 'https://scanandhire.com:8001';
+const API_BASE_URL = 'http://localhost:8002'; // For local testing
 const XANO_API_URL = 'https://xoho-w3ng-km3o.n7e.xano.io/api:L-QNLSmb/get_all_job_';
 const XANO_JOB_BY_ID_URL = 'https://xoho-w3ng-km3o.n7e.xano.io/api:L-QNLSmb/job';
 const XANO_CHAT_URL = 'https://xoho-w3ng-km3o.n7e.xano.io/api:wnnakKFu/aichatmessages';
