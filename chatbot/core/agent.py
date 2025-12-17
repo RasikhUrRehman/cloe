@@ -15,7 +15,7 @@ except ImportError:
     LANGFUSE_AVAILABLE = False
 # from chatbot.core.retrievers import RetrievalMethod
 from chatbot.core.tools import create_agent_tools, AgentToolkit
-from chatbot.prompts.prompts import CleoPrompts
+from chatbot.prompts.prompts import get_system_prompt
 from chatbot.state.states import (
     ApplicationState,
     ConversationStage,
@@ -158,7 +158,7 @@ class CleoRAGAgent:
         if self.session_state.engagement and self.session_state.engagement.generated_questions:
             generated_questions = self.session_state.engagement.generated_questions
         # Use CleoPrompts to get the complete system prompt
-        return CleoPrompts.get_system_prompt(
+        return get_system_prompt(
             session_id=self.session_state.session_id,
             current_stage=self.session_state.current_stage,
             language=language,
@@ -717,19 +717,21 @@ class CleoRAGAgent:
             # Extract application information using simple patterns
             if self._extract_application_info(user_message, app):
                 state_changed = True
-            # Check if application is complete and trigger fit score calculation
+            # Check if application is complete and trigger fit score calculation + candidate creation
             if self._is_application_complete(app):
                 if not app.stage_completed:
                     app.application_status = "submitted"
                     app.stage_completed = True
                     # Calculate fit score and save application
                     self._calculate_and_save_fit_score()
-                    # Transition to verification/completed stage
-                    self.session_state.current_stage = ConversationStage.COMPLETED
-                    self._update_xano_status(ConversationStage.COMPLETED)
+                    # Create candidate immediately upon application completion
+                    self._create_candidate_immediately()
+                    # Transition to verification stage to prompt for verification
+                    self.session_state.current_stage = ConversationStage.VERIFICATION
+                    self._update_xano_status(ConversationStage.VERIFICATION)
                     state_changed = True
                     logger.info(
-                        "Application completed - Fit score calculated - Moving to COMPLETED stage"
+                        "Application completed - Candidate created - Moving to VERIFICATION stage for contact verification"
                     )
         # Verification stage updates
         elif self.session_state.current_stage == ConversationStage.VERIFICATION:
@@ -765,60 +767,10 @@ class CleoRAGAgent:
         """
         import re
         state_changed = False
-        # Email pattern
-        email_pattern = r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"
-        if not app.email:
-            email_match = re.search(email_pattern, user_message)
-            if email_match:
-                app.email = email_match.group()
-                logger.info("Email captured")
-                state_changed = True
-        # Phone pattern
-        phone_pattern = (
-            r"(\+?1?[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})"
-        )
-        if not app.phone_number:
-            phone_match = re.search(phone_pattern, user_message)
-            if phone_match:
-                app.phone_number = phone_match.group()
-                logger.info(f"Phone number captured: {app.phone_number}")
-                state_changed = True
-        # Name pattern (simple approach - look for "My name is" or similar)
-        name_patterns = [
-            r"my name is ([A-Za-z\s]{2,})",
-            r"i'm ([A-Za-z\s]{2,})",
-            r"i am ([A-Za-z\s]{2,})",
-            r"call me ([A-Za-z\s]{2,})",
-            r"this is ([A-Za-z\s]{2,})",
-        ]
-        false_positives = [
-            "interested", "looking", "good", "ready", "over", "older",
-            "above", "under", "authorized", "eighteen", "fine", "great",
-            "okay", "ok", "yes", "no", "here", "back", "done",
-        ]
-        if not app.full_name:
-            for pattern in name_patterns:
-                name_match = re.search(pattern, user_message.lower())
-                if name_match:
-                    name = name_match.group(1).strip().title()
-                    if len(name) >= 2 and not any(word in name.lower() for word in false_positives):
-                        app.full_name = name
-                        logger.info(f"Name captured: {app.full_name}")
-                        state_changed = True
-                        break
-        # Fallback: If message is short and looks like a name, treat as name
-        if not app.full_name:
-            words = user_message.strip().split()
-            if 1 <= len(words) <= 3 and all(w.isalpha() for w in words):
-                # Avoid common non-names
-                false_positives = [
-                    "hi", "hello", "thanks", "thank", "bye", "goodbye", "ok", "okay", "yes", "no", "sure", "please", "help", "info", "information", "wrap", "up", "done", "finish", "end", "stop"
-                ]
-                if not any(w.lower() in false_positives for w in words):
-                    app.full_name = user_message.strip().title()
-                    state_changed = True
-                    logger.info(f"Fallback captured name: {app.full_name}")
-
+        
+        # Note: Email, phone, and name are now collected via agent tools (save_email, save_phone_number, save_name)
+        # The agent will call these tools when the user provides this information
+        
         # Experience patterns (more flexible)
         exp_patterns = [
             r"(\d+(?:\.\d+)?)\s*years?",  # e.g. 5 years, 2.5 years
@@ -940,61 +892,10 @@ class CleoRAGAgent:
             logger.info("Proactively captured transportation")
         # Extract application information
         app = self.session_state.application
-        # Email pattern
-        email_pattern = r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"
-        if not app.email:
-            email_match = re.search(email_pattern, user_message)
-            if email_match:
-                app.email = email_match.group()
-                state_changed = True
-                logger.info(f"Proactively captured email: {app.email}")
-        # Phone pattern
-        phone_pattern = (
-            r"(\+?1?[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})"
-        )
-        if not app.phone_number:
-            phone_match = re.search(phone_pattern, user_message)
-            if phone_match:
-                app.phone_number = phone_match.group()
-                state_changed = True
-                logger.info(f"Proactively captured phone number: {app.phone_number}")
-        # Name pattern - capture names from common phrases
-        name_patterns = [
-            r"my name is ([A-Za-z\s]+)",
-            r"i'm ([A-Za-z\s]+)",
-            r"i am ([A-Za-z\s]+)",
-            r"call me ([A-Za-z\s]+)",
-            r"this is ([A-Za-z\s]+)",
-            r"it's ([A-Za-z\s]+)",
-        ]
-        false_positives = [
-            "interested", "looking", "good", "ready", "over", "older",
-            "above", "under", "authorized", "eighteen", "fine", "great",
-            "okay", "ok", "yes", "no", "here", "back", "done",
-        ]
-        if not app.full_name:
-            for pattern in name_patterns:
-                name_match = re.search(pattern, user_lower)
-                if name_match:
-                    name = name_match.group(1).strip().title()
-                    if len(name) >= 2 and not any(word in name.lower() for word in false_positives):
-                        app.full_name = name
-                        logger.info(f"Proactively captured name: {name}")
-                        state_changed = True
-                        break
-        # Fallback: If message is short and looks like a name, treat as name
-        if not app.full_name:
-            words = user_message.strip().split()
-            if 1 <= len(words) <= 3 and all(w.isalpha() for w in words):
-                # Avoid common non-names
-                false_positives = [
-                    "hi", "hello", "thanks", "thank", "bye", "goodbye", "ok", "okay", "yes", "no", "sure", "please", "help", "info", "information", "wrap", "up", "done", "finish", "end", "stop"
-                ]
-                if not any(w.lower() in false_positives for w in words):
-                    app.full_name = user_message.strip().title()
-                    state_changed = True
-                    logger.info(f"Fallback captured name: {app.full_name}")
-
+        
+        # Note: Email, phone, and name are now collected via agent tools (save_email, save_phone_number, save_name)
+        # The agent will call these tools when the user provides this information
+        
         # Experience patterns (more flexible)
         exp_patterns = [
             r"(\d+(?:\.\d+)?)\s*years?",  # e.g. 5 years, 2.5 years
@@ -1045,6 +946,31 @@ class CleoRAGAgent:
             import traceback
             traceback.print_exc()
             # Don't let fit score calculation failure prevent state progression
+
+    def _create_candidate_immediately(self):
+        """
+        Create the candidate record immediately when application is complete.
+        This is triggered automatically, not by user saying goodbye.
+        """
+        try:
+            logger.info("Creating candidate immediately upon application completion...")
+            
+            # Ensure candidate is created using the toolkit's method
+            candidate_id = self.toolkit._ensure_candidate_created()
+            
+            if candidate_id:
+                logger.info(f"Candidate created successfully: {candidate_id}")
+                return candidate_id
+            else:
+                logger.warning("Failed to create candidate during application completion")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error creating candidate immediately: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
     def get_conversation_summary(self) -> Dict[str, Any]:
         """Get summary of current conversation state"""
         app_complete = (
