@@ -432,6 +432,7 @@ function handleJobSelection() {
                 <p><strong>Age Requirement:</strong> ${ageReq}</p>
                 <p><strong>Starting Date:</strong> ${selectedJobDetails.Starting_Date || 'N/A'}</p>
                 ${selectedJobDetails.description ? `<p><strong>Description:</strong> ${selectedJobDetails.description.substring(0, 150)}...</p>` : ''}
+                <a href="/job-details/${selectedJobId}" target="_blank" class="view-job-details-link" style="display: inline-block; margin-top: 0.75rem; padding: 0.5rem 1rem; background: var(--primary-color); color: white; text-decoration: none; border-radius: 6px; font-size: 0.9rem; transition: all 0.3s ease;">View Full Details →</a>
             </div>
         `;
         selectedJobInfo.style.display = 'block';
@@ -650,8 +651,91 @@ newSessionButton.addEventListener('click', handleNewSession);
 jobSelect.addEventListener('change', handleJobSelection);
 refreshJobsButton.addEventListener('click', loadJobs);
 
+// Check URL parameters for existing session
+async function checkURLParameters() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const sessionIdParam = urlParams.get('session_id');
+    const jobIdParam = urlParams.get('job_id');
+    
+    if (sessionIdParam) {
+        console.log('Found session_id in URL:', sessionIdParam);
+        
+        // Session already created, just show the chat interface
+        sessionId = sessionIdParam;
+        
+        // Try to get session status to retrieve xano_session_id
+        try {
+            const statusResponse = await fetch(`${API_BASE_URL}/api/v1/sessions/${sessionId}/status`);
+            if (statusResponse.ok) {
+                const statusData = await statusResponse.json();
+                xanoSessionId = statusData.xano_session_id || null;
+                console.log('Retrieved xano_session_id:', xanoSessionId);
+            }
+        } catch (err) {
+            console.error('Error fetching session status:', err);
+        }
+        
+        // If job_id is present, find the job details
+        if (jobIdParam) {
+            selectedJobId = jobIdParam;
+            console.log('Found job_id in URL:', jobIdParam);
+            
+            // Try to fetch job details to show in sidebar
+            try {
+                const job = await fetchJobById(jobIdParam);
+                if (job) {
+                    selectedJobDetails = job;
+                    const ageReq = job.Age_18_Above ? "18+" : 
+                                  job.Age_16_above ? "16+" : "N/A";
+                    
+                    jobInfo.innerHTML = `
+                        <div class="job-info-content">
+                            <div class="job-info-title">${job.job_title}</div>
+                            <div class="job-info-detail"><strong>Type:</strong> ${job.job_type || 'N/A'}</div>
+                            <div class="job-info-detail"><strong>Pay:</strong> $${job.PayRate || 'N/A'}/hr</div>
+                            <div class="job-info-detail"><strong>Shift:</strong> ${job.Shift || 'N/A'}</div>
+                            <div class="job-info-detail"><strong>Experience:</strong> ${job.required_experience || 'N/A'} yrs</div>
+                            <div class="job-info-detail"><strong>Age:</strong> ${ageReq}</div>
+                        </div>
+                    `;
+                    jobInfoSection.style.display = 'block';
+                }
+            } catch (err) {
+                console.error('Error fetching job details:', err);
+            }
+        }
+        
+        // Show chat interface immediately
+        console.log('Showing chat interface...');
+        landingPage.style.display = 'none';
+        chatInterface.style.display = 'grid';
+        
+        // Update UI - use xano_session_id if available, otherwise use internal session_id
+        sessionIdDisplay.textContent = xanoSessionId || sessionId;
+        
+        // Add welcome message from sessionStorage or default
+        const welcomeMessage = sessionStorage.getItem('welcomeMessage') || 'Welcome! Let\'s continue with your application. How can I help you?';
+        addMessage(welcomeMessage, false);
+        sessionStorage.removeItem('welcomeMessage'); // Clean up
+        
+        // Start status updates
+        startStatusUpdates();
+        
+        // Focus input
+        messageInput.focus();
+        
+        // Clean up URL
+        window.history.replaceState({}, document.title, '/');
+        
+        console.log('Chat interface should now be visible');
+    }
+}
+
 // Load jobs on page load
 loadJobs();
+
+// Check for existing session in URL
+checkURLParameters();
 
 // Initial health check
 checkHealth();

@@ -19,7 +19,8 @@ from chatbot.utils.session_manager import get_session_manager
 from chatbot.api.routes import (
     chat_router,
     sessions_router,
-    applications_router
+    applications_router,
+    jobs_router
 )
 
 # Initialize logging
@@ -52,6 +53,7 @@ logger.info("Session manager initialized")
 app.include_router(chat_router)
 app.include_router(sessions_router)
 app.include_router(applications_router)
+app.include_router(jobs_router)
 
 
 # Health check models
@@ -92,6 +94,15 @@ async def serve_ui():
         return FileResponse(index_path, media_type="text/html")
     else:
         return {"message": "Web UI not found", "status": "error"}
+
+@app.get("/job-details/{job_id}")
+async def serve_job_details(job_id: str):
+    """Serve the job details page"""
+    job_details_path = os.path.join(WEB_DIR, "job-details.html")
+    if os.path.exists(job_details_path):
+        return FileResponse(job_details_path, media_type="text/html")
+    else:
+        return {"message": "Job details page not found", "status": "error"}
 
 # Mount static files for web UI (CSS, JS)
 if os.path.exists(WEB_DIR):
