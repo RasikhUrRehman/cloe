@@ -270,14 +270,23 @@ class AgentToolkit:
                 session_id=xano_session_id,
                 status="Short Listed"
             )
+
+            logger.info("========================================")
+            logger.info(f"Candidate creation response: {candidate}")
+            logger.info("========================================")
             
             if candidate:
                 candidate_id = candidate.get('id')
+                user_id = candidate.get('user_id')  # Extract user_id from candidate response
                 self._candidate_created = True
+
                 
-                # Store candidate_id in engagement state
+                # Store candidate_id and user_id in engagement state
                 if self.session_state.engagement:
                     self.session_state.engagement.candidate_id = candidate_id
+                    if user_id:
+                        self.session_state.engagement.user_id = user_id
+                        logger.info(f"Saved user_id {user_id} for candidate {candidate_id}")
                     # Update session with candidate_id in Xano
                     if xano_session_id:
                         self.xano_client.update_session(xano_session_id, {"candidate_id": candidate_id})
@@ -302,134 +311,46 @@ class AgentToolkit:
 
     def _fetch_contact_info_from_memory(self) -> bool:
         """
-        Scan the agent's conversation memory for contact information and populate
-        the session_state.application fields when found.
+        Check if contact information exists in the application state.
+        
+        Note: Contact information is now collected via agent tools (save_name, save_email, save_phone_number)
+        rather than extracted via regex or LLM parsing. This method only validates presence of required fields.
 
         Returns:
-            True if any field was populated, False otherwise
+            True if all contact fields are present, False otherwise
         """
         try:
-            # Build transcript from agent memory (if available) or Xano messages
-            transcript = []
-            if self.agent and hasattr(self.agent, 'memory') and hasattr(self.agent.memory, 'chat_memory'):
-                mem = self.agent.memory.chat_memory
-                for m in mem.messages:
-                    # messages have type and content
-                    role = getattr(m, 'type', 'human')
-                    content = getattr(m, 'content', '') or ''
-                    transcript.append(f"{role}: {content}")
-            elif self.session_state.engagement and self.session_state.engagement.xano_session_id:
-                try:
-                    messages = self.xano_client.get_messages_by_session_id(self.session_state.engagement.xano_session_id) or []
-                    for msg in messages:
-                        role = 'human' if msg.get('MsgCreator', '').lower() == 'user' else 'assistant'
-                        transcript.append(f"{role}: {msg.get('MsgContent', '')}")
-                except Exception:
-                    transcript = []
-
-            if not transcript:
-                return False
-
-            # Use LLM to extract contact info - prefer agent.llm if available
-            llm = None
-            if self.agent and hasattr(self.agent, 'llm') and self.agent.llm:
-                llm = self.agent.llm
-            else:
-                llm = ChatOpenAI(
-                    model=settings.OPENAI_CHAT_MODEL,
-                    temperature=0.0,
-                    openai_api_key=settings.OPENAI_API_KEY,
-                )
-
-            transcript_text = transcript
-            prompt = ( 
-                "You are a strict JSON extractor. Given the following conversation transcript between an agent and a user, extract the candidate's full name, email address, and phone number. \n"
-                "IMPORTANT INSTRUCTIONS:\n"
-                "- full_name: Extract BOTH first name AND last name. If only one name is mentioned, then ask to give full name. And judge with NER that it is a name and then store.\n"
-                "- email: Extract the complete email address with proper format (username@domain.extension). Skip if format is invalid.\n"
-                "- phone: Extract the phone number with all digits.\n"
-                "Return ONLY valid JSON with the exact keys: full_name, email, phone. Use null for missing fields and don't output any other text. If multiple values are present, use the most recent values.\n"
-                "Examples:\n"
-                "- Good full_name: \"John Smith\", \"Sarah Johnson\"\n"
-                "- Incomplete full_name: \"John\" (only first name)\n"
-                "- Good email: \"john.smith@gmail.com\", \"sarah@company.co.uk\"\n"
-                "- Invalid email: \"john@test\" (missing extension), \"test@test\" (incomplete domain)\n\n"
-                f"TRANSCRIPT:\n{transcript_text}\n\n"
-            )
-
-            logger.debug("Calling LLM to extract contact info from transcript")
-            response = llm.invoke(prompt)
-            response_text = response.content
-
-            # Extract JSON payload from response
-            import json, re
-            json_text = response_text.strip()
-            # If response contains code block, extract it
-            if "```json" in json_text:
-                start = json_text.find('```json') + 7
-                end = json_text.find('```', start)
-                json_text = json_text[start:end].strip()
-            elif "```" in json_text:
-                start = json_text.find('```') + 3
-                end = json_text.find('```', start)
-                json_text = json_text[start:end].strip()
-
-            extracted = None
-            try:
-                extracted = json.loads(json_text)
-            except Exception:
-                # Last resort: try to find email and phone using regex as fallback
-                extracted = {"full_name": None, "email": None, "phone": None}
-                email_m = re.search(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b", response_text)
-                phone_m = re.search(r"(\+?1?[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})", response_text)
-                name_m = re.search(r"\"?full_name\"?\s*[:=]\s*\"([A-Za-z\s]+)\"", response_text)
-                if email_m:
-                    extracted['email'] = email_m.group()
-                if phone_m:
-                    extracted['phone'] = phone_m.group()
-                if name_m:
-                    extracted['full_name'] = name_m.group(1).strip().title()
-
-            # Ensure app state
             from chatbot.state.states import ApplicationState
+            
+            # Ensure application state exists
             if not self.session_state.application:
                 self.session_state.application = ApplicationState(session_id=self.session_state.session_id)
+            
             app = self.session_state.application
-            updated = False
-            if isinstance(extracted, dict):
-                f = extracted.get('full_name')
-                e = extracted.get('email')
-                p = extracted.get('phone')
-                
-                # Validate and save full name
-                if f and not app.full_name:
-                    name_cleaned = f.strip().title()
-                    # Check if name has at least 2 parts (first and last)
-                    name_parts = name_cleaned.split()
-                    if len(name_parts) < 2:
-                        logger.warning(f"Extracted name appears incomplete: '{name_cleaned}' (only {len(name_parts)} part(s))")
-                    app.full_name = name_cleaned
-                    updated = True
-                
-                # Validate and save email
-                if e and not app.email:
-                    email_cleaned = e.strip().lower()
-                    # Validate email format
-                    email_pattern = r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}$"
-                    if re.match(email_pattern, email_cleaned):
-                        app.email = email_cleaned
-                        updated = True
-                    else:
-                        logger.warning(f"Extracted email has invalid format: '{email_cleaned}'")
-                
-                # Save phone
-                if p and not app.phone_number:
-                    app.phone_number = p.strip()
-                    updated = True
-
-            return updated
+            
+            # Check if all required contact fields are present
+            has_all_info = (
+                app.full_name is not None and
+                app.email is not None and
+                app.phone_number is not None
+            )
+            
+            if has_all_info:
+                logger.info("All contact information is present in application state")
+            else:
+                missing = []
+                if not app.full_name:
+                    missing.append("full_name")
+                if not app.email:
+                    missing.append("email")
+                if not app.phone_number:
+                    missing.append("phone_number")
+                logger.warning(f"Missing contact information: {', '.join(missing)}")
+            
+            return has_all_info
+            
         except Exception as e:
-            logger.error(f"Error while extracting contact info using LLM: {e}")
+            logger.error(f"Error checking contact info: {e}")
             return False
 
     def conclude_session(self, reason: str) -> str:
@@ -519,6 +440,7 @@ class AgentToolkit:
             # Finally, attempt to create candidate if all required fields are present
             if (
                 self.session_state.application
+                and not self._candidate_created
                 and self.session_state.application.full_name
                 and self.session_state.application.email
                 and self.session_state.application.phone_number
@@ -580,20 +502,30 @@ class AgentToolkit:
         logger.info("Candidate not yet created. Creating candidate now before verification...")
         
         try:
-            # Calculate fit score
-            fit_score = self._calculate_fit_score()
-            
-            # Generate PDF report
-            pdf_path = self._generate_pdf_report(fit_score)
-            
-            # Create candidate
-            candidate_id = self._create_candidate_on_conclude(fit_score, pdf_path)
-            
-            if candidate_id:
-                logger.info(f"Candidate created successfully: {candidate_id}")
-                return candidate_id
+            if (
+                self.session_state.application
+                and not self._candidate_created
+                and self.session_state.application.full_name
+                and self.session_state.application.email
+                and self.session_state.application.phone_number
+            ):
+                # Calculate fit score
+                fit_score = self._calculate_fit_score()
+                
+                # Generate PDF report
+                pdf_path = self._generate_pdf_report(fit_score)
+                
+                # Create candidate
+                candidate_id = self._create_candidate_on_conclude(fit_score, pdf_path)
+                
+                if candidate_id:
+                    logger.info(f"Candidate created successfully: {candidate_id}")
+                    return candidate_id
+                else:
+                    logger.warning("Failed to create candidate")
+                    return None
             else:
-                logger.warning("Failed to create candidate")
+                logger.warning("Cannot create candidate: missing name, email, or phone")
                 return None
                 
         except Exception as e:
@@ -618,6 +550,12 @@ class AgentToolkit:
                 logger.warning("Cannot send email verification code: candidate could not be created")
                 return "✗ Unable to prepare verification. Please complete your application first."
             
+            # Check if we already have user_id from candidate creation
+            user_id = None
+            if self.session_state.engagement and self.session_state.engagement.user_id:
+                user_id = self.session_state.engagement.user_id
+                logger.info(f"Using stored user_id {user_id} from candidate creation")
+            
             # Call Xano API to send email code
             url = "https://xoho-w3ng-km3o.n7e.xano.io/api:QMW9Va2W/Send_Code_to_Email"
             payload = {"email": email}
@@ -626,7 +564,9 @@ class AgentToolkit:
             response.raise_for_status()
             
             result = response.json()
-            user_id = result.get('id')
+            # Use user_id from API response if we don't have one yet
+            if not user_id:
+                user_id = result.get('id')
             email_code = result.get('EmailCode')
             
             # Store verification state for this session
@@ -667,6 +607,8 @@ class AgentToolkit:
                 logger.warning("Cannot validate email verification code: candidate could not be created")
                 return "✗ Unable to complete verification. Please complete your application first."
             
+            user_id = self.session_state.engagement.user_id
+            logger.info(f"Validating email verification for user_id: {user_id}, candidate_id: {candidate_id}")
             # Call Xano API to validate email code
             url = "https://xoho-w3ng-km3o.n7e.xano.io/api:QMW9Va2W/ValidateEmail"
             payload = {"user_id": user_id, "Code": code}
@@ -675,6 +617,10 @@ class AgentToolkit:
             response.raise_for_status()
             
             result = response.json()
+            logger.info("========================================")
+            logger.info(f"Email verification response: {result}")
+
+            logger.info("========================================")
             email_verified = result.get('EmailVerification', False)
             
             if email_verified:
@@ -715,6 +661,12 @@ class AgentToolkit:
                 logger.warning("Cannot send phone verification code: candidate could not be created")
                 return "✗ Unable to prepare verification. Please complete your application first."
             
+            # Check if we already have user_id from candidate creation
+            user_id = None
+            if self.session_state.engagement and self.session_state.engagement.user_id:
+                user_id = self.session_state.engagement.user_id
+                logger.info(f"Using stored user_id {user_id} from candidate creation")
+            
             # Call Xano API to send phone code (using email as identifier)
             url = "https://xoho-w3ng-km3o.n7e.xano.io/api:QMW9Va2W/Send_Code_to_Phone"
             # The API expects email parameter based on the notebook example
@@ -729,7 +681,9 @@ class AgentToolkit:
             response.raise_for_status()
             
             result = response.json()
-            user_id = result.get('id')
+            # Use user_id from API response if we don't have one yet
+            if not user_id:
+                user_id = result.get('id')
             phone_code = result.get('PhoneCode')
             
             # Store verification state for this session
@@ -770,6 +724,8 @@ class AgentToolkit:
                 logger.warning("Cannot validate phone verification code: candidate could not be created")
                 return "✗ Unable to complete verification. Please complete your application first."
             
+            user_id = self.session_state.engagement.user_id
+            
             # Call Xano API to validate phone code
             url = "https://xoho-w3ng-km3o.n7e.xano.io/api:QMW9Va2W/ValidatePhoneVerification"
             payload = {"user_id": user_id, "Code": code}
@@ -800,6 +756,87 @@ class AgentToolkit:
             logger.error(f"Unexpected error validating phone verification: {e}")
             return f"✗ An error occurred during verification. Please try again."
 
+    def save_phone_number(self, phone_number: str) -> str:
+        """
+        Save the candidate's phone number to application state.
+        
+        Args:
+            phone_number: The phone number provided by the candidate
+            
+        Returns:
+            Success message confirming the phone number was saved
+        """
+        try:
+            from chatbot.state.states import ApplicationState
+            
+            # Ensure application state exists
+            if not self.session_state.application:
+                self.session_state.application = ApplicationState(session_id=self.session_state.session_id)
+            
+            # Save phone number
+            self.session_state.application.phone_number = phone_number.strip()
+            logger.info(f"Phone number saved: {phone_number}")
+            
+            return f"✓ Phone number saved: {phone_number}"
+            
+        except Exception as e:
+            logger.error(f"Error saving phone number: {e}")
+            return f"✗ Failed to save phone number. Please try again."
+
+    def save_email(self, email: str) -> str:
+        """
+        Save the candidate's email address to application state.
+        
+        Args:
+            email: The email address provided by the candidate
+            
+        Returns:
+            Success message confirming the email was saved
+        """
+        try:
+            from chatbot.state.states import ApplicationState
+            
+            # Ensure application state exists
+            if not self.session_state.application:
+                self.session_state.application = ApplicationState(session_id=self.session_state.session_id)
+            
+            # Save email (lowercase for consistency)
+            self.session_state.application.email = email.strip().lower()
+            logger.info(f"Email saved: {email}")
+            
+            return f"✓ Email saved: {email}"
+            
+        except Exception as e:
+            logger.error(f"Error saving email: {e}")
+            return f"✗ Failed to save email. Please try again."
+
+    def save_name(self, full_name: str) -> str:
+        """
+        Save the candidate's full name to application state.
+        
+        Args:
+            full_name: The full name (first and last) provided by the candidate
+            
+        Returns:
+            Success message confirming the name was saved
+        """
+        try:
+            from chatbot.state.states import ApplicationState
+            
+            # Ensure application state exists
+            if not self.session_state.application:
+                self.session_state.application = ApplicationState(session_id=self.session_state.session_id)
+            
+            # Save name with proper capitalization
+            self.session_state.application.full_name = full_name.strip().title()
+            logger.info(f"Name saved: {full_name}")
+            
+            return f"✓ Name saved: {full_name}"
+            
+        except Exception as e:
+            logger.error(f"Error saving name: {e}")
+            return f"✗ Failed to save name. Please try again."
+
     def get_tools(self) -> List[StructuredTool]:
         """
         Get all tools bound to this toolkit's session state.
@@ -812,6 +849,34 @@ class AgentToolkit:
                 func=self.save_state,
                 name="save_state",
                 description="Save the current conversation state to persistent storage. Use this to save key conversation milestones like when user starts application, shares resume, or agrees to proceed.",
+            ),
+            StructuredTool.from_function(
+                func=self.save_phone_number,
+                name="save_phone_number",
+                description=(
+                    "Save the candidate's phone number. Call this when the user provides their phone number. "
+                    "The agent should extract the phone number from the user's message and call this tool with the cleaned phone number. "
+                    "Input: phone_number (e.g., '555-123-4567', '+1-555-123-4567')"
+                ),
+            ),
+            StructuredTool.from_function(
+                func=self.save_email,
+                name="save_email",
+                description=(
+                    "Save the candidate's email address. Call this when the user provides their email. "
+                    "The agent should extract the email from the user's message and call this tool with the email address. "
+                    "Input: email (e.g., 'john.doe@example.com')"
+                ),
+            ),
+            StructuredTool.from_function(
+                func=self.save_name,
+                name="save_name",
+                description=(
+                    "Save the candidate's full name (first and last name). Call this when the user provides their name. "
+                    "The agent should extract the full name from the user's message and call this tool. "
+                    "IMPORTANT: Only call this when you have BOTH first name AND last name. If user only provides first name, ask for the last name. "
+                    "Input: full_name (e.g., 'John Smith', 'Sarah Johnson')"
+                ),
             ),
             StructuredTool.from_function(
                 func=self.send_email_verification_code,

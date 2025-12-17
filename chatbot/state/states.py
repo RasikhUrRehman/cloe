@@ -31,6 +31,7 @@ class EngagementState(BaseModel):
     stage_completed: bool = False
     xano_session_id: Optional[int] = None  # Xano backend session ID
     candidate_id: Optional[int] = None  # Xano candidate ID
+    user_id: Optional[int] = None  # User ID from candidate creation (used for verification)
     
     class Config:
         use_enum_values = True
