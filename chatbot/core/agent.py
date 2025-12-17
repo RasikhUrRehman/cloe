@@ -15,7 +15,7 @@ except ImportError:
     LANGFUSE_AVAILABLE = False
 # from chatbot.core.retrievers import RetrievalMethod
 from chatbot.core.tools import create_agent_tools, AgentToolkit
-from chatbot.prompts.prompts import CleoPrompts
+from chatbot.prompts.prompts import get_system_prompt
 from chatbot.state.states import (
     ApplicationState,
     ConversationStage,
@@ -158,7 +158,7 @@ class CleoRAGAgent:
         if self.session_state.engagement and self.session_state.engagement.generated_questions:
             generated_questions = self.session_state.engagement.generated_questions
         # Use CleoPrompts to get the complete system prompt
-        return CleoPrompts.get_system_prompt(
+        return get_system_prompt(
             session_id=self.session_state.session_id,
             current_stage=self.session_state.current_stage,
             language=language,
