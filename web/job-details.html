@@ -8,12 +8,12 @@
     <style>
         .job-detail-page {
             min-height: 100vh;
-            padding: 2rem;
+            padding: 1rem;
             background: linear-gradient(135deg, var(--bg-color) 0%, #1a2744 100%);
         }
 
         .job-detail-container {
-            max-width: 1200px;
+            max-width: 600px;
             margin: 0 auto;
             background: var(--surface-color);
             border-radius: 16px;
@@ -24,26 +24,26 @@
 
         .job-detail-header {
             background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
-            padding: 2rem;
+            padding: 1.25rem;
             color: white;
         }
 
         .job-detail-header h1 {
-            font-size: 2.5rem;
-            margin-bottom: 0.5rem;
+            font-size: 2rem;
+            margin-bottom: 0.25rem;
         }
 
         .job-detail-header .company-name {
-            font-size: 1.5rem;
+            font-size: 1.25rem;
             opacity: 0.95;
-            margin-bottom: 1rem;
+            margin-bottom: 0.5rem;
         }
 
         .job-meta {
             display: flex;
             flex-wrap: wrap;
-            gap: 1.5rem;
-            margin-top: 1rem;
+            gap: 1rem;
+            margin-top: 0.5rem;
         }
 
         .job-meta-item {
@@ -59,25 +59,25 @@
         }
 
         .job-detail-content {
-            padding: 2rem;
+            padding: 1.25rem;
         }
 
         .job-section {
-            margin-bottom: 2.5rem;
+            margin-bottom: 1.25rem;
         }
 
         .job-section h2 {
-            font-size: 1.75rem;
+            font-size: 1.5rem;
             color: var(--primary-color);
-            margin-bottom: 1rem;
+            margin-bottom: 0.75rem;
             border-bottom: 2px solid var(--border-color);
-            padding-bottom: 0.5rem;
+            padding-bottom: 0.4rem;
         }
 
         .job-section p, .job-section ul, .job-section ol {
             color: var(--text-secondary);
-            line-height: 1.8;
-            margin-bottom: 1rem;
+            line-height: 1.6;
+            margin-bottom: 0.75rem;
         }
 
         .job-section ul, .job-section ol {
@@ -85,7 +85,7 @@
         }
 
         .job-section li {
-            margin-bottom: 0.5rem;
+            margin-bottom: 0.25rem;
         }
 
         .job-tags {
@@ -107,7 +107,7 @@
         .job-actions {
             display: flex;
             gap: 1rem;
-            padding: 2rem;
+            padding: 1.25rem;
             background: var(--bg-color);
             border-top: 1px solid var(--border-color);
         }
@@ -241,12 +241,12 @@
         .info-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 1.5rem;
-            margin: 1.5rem 0;
+            gap: 1rem;
+            margin: 0 0 1rem 0;
         }
 
         .info-card {
-            padding: 1.5rem;
+            padding: 1rem;
             background: var(--bg-color);
             border: 1px solid var(--border-color);
             border-radius: 8px;
@@ -255,11 +255,11 @@
         .info-card-label {
             font-size: 0.9rem;
             color: var(--text-secondary);
-            margin-bottom: 0.5rem;
+            margin-bottom: 0.35rem;
         }
 
         .info-card-value {
-            font-size: 1.25rem;
+            font-size: 1.1rem;
             color: var(--text-primary);
             font-weight: 600;
         }
@@ -299,6 +299,14 @@
                 <!-- Job Information Grid -->
                 <div class="info-grid" id="infoGrid">
                     <!-- Info cards will be inserted here -->
+                </div>
+
+                <!-- QR Code Section -->
+                <div class="job-section" id="qrCodeSection" style="display: none;">
+                    <div style="text-align: center; padding: 1rem 0;">
+                        <img id="qrCodeImage" src="" alt="QR Code" style="max-width: 200px; width: 100%; height: auto; border: 2px solid var(--border-color); border-radius: 8px; padding: 0.75rem; background: white;">
+                        <p style="margin-top: 0.75rem; color: var(--text-secondary); font-size: 0.9rem;">Scan this QR code with your phone to apply</p>
+                    </div>
                 </div>
 
                 <!-- Shift -->
@@ -346,14 +354,6 @@
                 <div class="job-section" id="additionalInfoSection" style="display: none;">
                     <h4>Additional Information</h4>
                     <div id="additionalInfo"></div>
-                </div>
-                
-                <!-- QR Code Section -->
-                <div class="job-section" id="qrCodeSection" style="display: none;">
-                    <div style="text-align: center; padding: 2rem;">
-                        <img id="qrCodeImage" src="" alt="QR Code" style="max-width: 250px; width: 100%; height: auto; border: 2px solid var(--border-color); border-radius: 8px; padding: 1rem; background: white;">
-                        <p style="margin-top: 1rem; color: var(--text-secondary);">Scan this QR code with your phone to apply</p>
-                    </div>
                 </div>
             </div>
 
