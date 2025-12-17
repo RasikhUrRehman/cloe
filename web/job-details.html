@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Job Details - Cleo</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        .job-detail-page {
+            min-height: 100vh;
+            padding: 2rem;
+            background: linear-gradient(135deg, var(--bg-color) 0%, #1a2744 100%);
+        }
+
+        .job-detail-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: var(--surface-color);
+            border-radius: 16px;
+            border: 1px solid var(--border-color);
+            overflow: hidden;
+            box-shadow: var(--shadow-lg);
+        }
+
+        .job-detail-header {
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            padding: 2rem;
+            color: white;
+        }
+
+        .job-detail-header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .job-detail-header .company-name {
+            font-size: 1.5rem;
+            opacity: 0.95;
+            margin-bottom: 1rem;
+        }
+
+        .job-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1.5rem;
+            margin-top: 1rem;
+        }
+
+        .job-meta-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 1rem;
+        }
+
+        .job-meta-item svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        .job-detail-content {
+            padding: 2rem;
+        }
+
+        .job-section {
+            margin-bottom: 2.5rem;
+        }
+
+        .job-section h2 {
+            font-size: 1.75rem;
+            color: var(--primary-color);
+            margin-bottom: 1rem;
+            border-bottom: 2px solid var(--border-color);
+            padding-bottom: 0.5rem;
+        }
+
+        .job-section p, .job-section ul, .job-section ol {
+            color: var(--text-secondary);
+            line-height: 1.8;
+            margin-bottom: 1rem;
+        }
+
+        .job-section ul, .job-section ol {
+            padding-left: 2rem;
+        }
+
+        .job-section li {
+            margin-bottom: 0.5rem;
+        }
+
+        .job-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            margin-top: 1rem;
+        }
+
+        .job-tag {
+            padding: 0.5rem 1rem;
+            background: var(--surface-light);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            font-size: 0.9rem;
+            color: var(--text-primary);
+        }
+
+        .job-actions {
+            display: flex;
+            gap: 1rem;
+            padding: 2rem;
+            background: var(--bg-color);
+            border-top: 1px solid var(--border-color);
+        }
+
+        .btn {
+            padding: 1rem 2rem;
+            font-size: 1rem;
+            font-weight: 600;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-lg);
+        }
+
+        .btn-secondary {
+            background: var(--surface-color);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+        }
+
+        .btn-secondary:hover {
+            background: var(--surface-light);
+        }
+
+        .loading-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 60vh;
+            gap: 1rem;
+        }
+
+        .loading-spinner-large {
+            width: 60px;
+            height: 60px;
+            border: 5px solid var(--border-color);
+            border-top-color: var(--primary-color);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        .error-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 60vh;
+            gap: 1rem;
+            text-align: center;
+        }
+
+        .error-icon {
+            font-size: 4rem;
+        }
+
+        .error-message {
+            font-size: 1.5rem;
+            color: var(--error-color);
+        }
+
+        .error-description {
+            color: var(--text-secondary);
+            max-width: 600px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .job-detail-container.loaded {
+            animation: fadeInUp 0.6s ease-out;
+        }
+
+        .back-button {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.75rem 1.5rem;
+            background: var(--surface-color);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            text-decoration: none;
+            margin-bottom: 2rem;
+            transition: all 0.3s ease;
+        }
+
+        .back-button:hover {
+            background: var(--surface-light);
+            transform: translateX(-5px);
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 0.4rem 1rem;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            background: var(--success-color);
+            color: white;
+        }
+
+        .status-badge.closed {
+            background: var(--error-color);
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+            margin: 1.5rem 0;
+        }
+
+        .info-card {
+            padding: 1.5rem;
+            background: var(--bg-color);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+        }
+
+        .info-card-label {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.5rem;
+        }
+
+        .info-card-value {
+            font-size: 1.25rem;
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <div class="job-detail-page">
+        
+
+        <!-- Loading State -->
+        <div id="loadingState" class="loading-container">
+            <div class="loading-spinner-large"></div>
+            <p style="color: var(--text-secondary);">Loading job details...</p>
+        </div>
+
+        <!-- Error State -->
+        <div id="errorState" class="error-container" style="display: none;">
+            <div class="error-icon">⚠️</div>
+            <h2 class="error-message">Job Not Found</h2>
+            <p class="error-description">
+                We couldn't find the job you're looking for. It may have been removed or the ID is incorrect.
+            </p>
+            <a href="/" class="btn btn-primary">Return to Home</a>
+        </div>
+
+        <!-- Job Details Content -->
+        <div id="jobDetailContent" class="job-detail-container" style="display: none;">
+            <div class="job-detail-header">
+                <h1 id="jobTitle">Loading...</h1>
+                <div class="company-name" id="companyName"></div>
+                <div class="job-meta" id="jobMeta">
+                    <!-- Meta information will be inserted here -->
+                </div>
+            </div>
+
+            <div class="job-detail-content">
+                <!-- Job Information Grid -->
+                <div class="info-grid" id="infoGrid">
+                    <!-- Info cards will be inserted here -->
+                </div>
+
+                <!-- Shift -->
+                <div class="job-section" id="shiftSection" style="display: none;">
+                    <h4>Shift</h4>
+                    <div id="jobShift"></div>
+                </div>
+
+                <!-- Required Experience -->
+                <div class="job-section" id="experienceSection" style="display: none;">
+                    <h4>Required Experience</h4>
+                    <div id="jobExperience"></div>
+                </div>
+
+                <!-- Starting Date -->
+                <div class="job-section" id="startDateSection" style="display: none;">
+                    <h4>Starting Date</h4>
+                    <div id="jobStartDate"></div>
+                </div>
+                <!-- Description -->
+                <div class="job-section" id="descriptionSection">
+                    <h4>Job Description</h4>
+                    <div id="jobDescription"></div>
+                </div>
+
+                <!-- Requirements (Hidden) -->
+                <div class="job-section" id="requirementsSection" style="display: none;">
+                    <h4>Requirements</h4>
+                    <div id="jobRequirements"></div>
+                </div>
+
+                <!-- Responsibilities (Hidden) -->
+                <div class="job-section" id="responsibilitiesSection" style="display: none;">
+                    <h4>Responsibilities</h4>
+                    <div id="jobResponsibilities"></div>
+                </div>
+
+                <!-- Benefits (Hidden) -->
+                <div class="job-section" id="benefitsSection" style="display: none;">
+                    <h4>Benefits</h4>
+                    <div id="jobBenefits"></div>
+                </div>
+
+                <!-- Additional Information (Hidden) -->
+                <div class="job-section" id="additionalInfoSection" style="display: none;">
+                    <h4>Additional Information</h4>
+                    <div id="additionalInfo"></div>
+                </div>
+                
+                <!-- QR Code Section -->
+                <div class="job-section" id="qrCodeSection" style="display: none;">
+                    <div style="text-align: center; padding: 2rem;">
+                        <img id="qrCodeImage" src="" alt="QR Code" style="max-width: 250px; width: 100%; height: auto; border: 2px solid var(--border-color); border-radius: 8px; padding: 1rem; background: white;">
+                        <p style="margin-top: 1rem; color: var(--text-secondary);">Scan this QR code with your phone to apply</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="job-actions">
+                <button class="btn btn-primary" id="applyButton">Apply for this Position</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/job-details.js"></script>
+</body>
+</html>
