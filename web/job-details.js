@@ -242,23 +242,23 @@ function renderJobDetails(job) {
         applyButton.dataset.jobId = job.id;
     }
     
-    // Show QR code if available
-    const qrCodeSection = document.getElementById('qrCodeSection');
-    const qrCodeImg = document.getElementById('qrCodeImage');
+    // // Show QR code if available
+    // const qrCodeSection = document.getElementById('qrCodeSection');
+    // const qrCodeImg = document.getElementById('qrCodeImage');
     
-    if (qrCodeSection && qrCodeImg) {
-        // Check for QR code in multiple possible fields
-        const qrUrl = job.Company_QR || job.qr_code_url || job.qr_code_image || job.qr_image || job.qrCode || job.qr_code;
+    // if (qrCodeSection && qrCodeImg) {
+    //     // Check for QR code in multiple possible fields
+    //     const qrUrl = job.Company_QR || job.qr_code_url || job.qr_code_image || job.qr_image || job.qrCode || job.qr_code;
         
-        if (qrUrl && qrUrl !== 'ljkhkjhk') { // Also check for dummy values
-            qrCodeImg.src = qrUrl;
-            qrCodeImg.alt = 'QR Code to apply for this position';
-            qrCodeSection.style.display = 'block';
-        } else {
-            // Hide QR section if no valid QR code
-            qrCodeSection.style.display = 'none';
-        }
-    }
+    //     if (qrUrl && qrUrl !== 'ljkhkjhk') { // Also check for dummy values
+    //         qrCodeImg.src = qrUrl;
+    //         qrCodeImg.alt = 'QR Code to apply for this position';
+    //         qrCodeSection.style.display = 'block';
+    //     } else {
+    //         // Hide QR section if no valid QR code
+    //         qrCodeSection.style.display = 'none';
+    //     }
+    // }
     
     // Show the content
     const loadingState = document.getElementById('loadingState');
