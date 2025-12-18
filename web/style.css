@@ -710,3 +710,10 @@ body {
 ::-webkit-scrollbar-thumb:hover {
     background: var(--border-color);
 }
+
+.chat-crrollbar{
+    overflow-y: auto;
+}
+.parent-overflow{
+    overflow: hidden;
+}

@@ -432,7 +432,7 @@ function handleJobSelection() {
                 <p><strong>Age Requirement:</strong> ${ageReq}</p>
                 <p><strong>Starting Date:</strong> ${selectedJobDetails.Starting_Date || 'N/A'}</p>
                 ${selectedJobDetails.description ? `<p><strong>Description:</strong> ${selectedJobDetails.description.substring(0, 150)}...</p>` : ''}
-                <a href="/job-details/${selectedJobId}" target="_blank" class="view-job-details-link" style="display: inline-block; margin-top: 0.75rem; padding: 0.5rem 1rem; background: var(--primary-color); color: white; text-decoration: none; border-radius: 6px; font-size: 0.9rem; transition: all 0.3s ease;">View Full Details →</a>
+                
             </div>
         `;
         selectedJobInfo.style.display = 'block';
