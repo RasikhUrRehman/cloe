@@ -666,19 +666,19 @@ class XanoClient:
                 else:
                     logger.warning(f"File not found: {file_path}")
             
-            # # Prepare headers without Content-Type (let requests set it for multipart)
-            # headers = {}
-            # if self.auth_token:
-            #     headers['Authorization'] = f'Bearer {self.auth_token}'
-            # headers['accept'] = 'application/json'
+            # Prepare headers with API key authorization for candidate creation
+            headers = {
+                'x-api-key': 'sk_test_51QxA9F7C2E8B4D1A6F9C3E7B2A'
+            }
                 
             logger.info(f"Creating new candidate in Xano: {name}")
             logger.debug(f"Candidate form data: {form_data}")
             
-            # Merge form_data and files for the request
+            # Merge form_data and files for the request (form-data format)
             response = self.session.post(
                 url, 
                 files={**form_data, **(files or {})},
+                headers=headers,
                 timeout=self.timeout
             )
             response.raise_for_status()
