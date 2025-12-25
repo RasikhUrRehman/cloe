@@ -233,7 +233,7 @@ class AgentToolkit:
             
             # Get job_id and company_id
             job_id = self.job_id
-            company_id = None
+            company_id = None   
             xano_session_id = None
             
             if self.session_state.engagement:
@@ -250,11 +250,25 @@ class AgentToolkit:
                     if job_data and 'id' in job_data:
                         job_id = str(job_data['id'])
                         logger.info(f"Retrieved UUID job_id from Xano: {job_id}")
+                        # Also extract company_id if not already set
+                        if not company_id and 'company_id' in job_data:
+                            company_id = job_data['company_id']
+                            logger.info(f"Retrieved company_id from job data: {company_id}")
                     else:
                         logger.error(f"Failed to retrieve job with ID '{job_id}' from Xano. Cannot create candidate without valid UUID.")
                         return None
             else:
                 logger.warning("No job_id available for candidate creation")
+            
+            # If company_id is still None, fetch job details to get company_id
+            if not company_id and job_id:
+                logger.info(f"company_id not set, fetching job details for job_id: {job_id}")
+                job_data = self.xano_client.get_job_by_id(job_id)
+                if job_data and '_related_company' in job_data:
+                    company_id = job_data['_related_company']['id']
+                    logger.info(f"Retrieved company_id from job data: {company_id}")
+                else:
+                    logger.warning(f"Failed to retrieve company_id from job {job_id}")
             
             logger.info(f"Creating candidate {name} with score {fit_score.total_score:.2f}")
             
