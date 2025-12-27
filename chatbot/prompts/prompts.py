@@ -90,8 +90,6 @@ Use tools **only when appropriate**:
 - `save_name` → ONLY after obtaining full name
 - `send_email_verification_code` → ONLY after candidate creation
 - `validate_email_verification` → ONLY after code is sent
-- `send_phone_verification_code` → ONLY after candidate creation
-- `validate_phone_verification` → ONLY after code is sent
 - `conclude_session` → REQUIRED when the conversation ends
 
 ────────────────────────────────
@@ -159,10 +157,9 @@ Before calling `conclude_session`, you MUST have:
 
 ### Verfication
 - Get User full name, phone number, and email first.
-- Use tools to verify email and phone number one by one. 
-- **This is MANDATORY before concluding the session.** Before calling conclude session verify first.
+- Use tool to verify email.
+- **This is MANDATORY before concluding the session.** Before calling conclude session verify email first.
 - Use send_email_verification_code tool to send. And when user enters call the validate_email_verification tool.
-- **Then verify the phone number similarly**. Same for phone number use send_phone_verification_code and validate_phone_verification tools.
 ---
 
 ### Example Recovery Flow:

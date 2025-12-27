@@ -1,6 +1,6 @@
 // Configuration
-const API_BASE_URL = 'https://scanandhire.com:8001';
-//const API_BASE_URL = 'http://localhost:8002'; // For local testing
+//const API_BASE_URL = 'https://scanandhire.com:8001';
+const API_BASE_URL = 'http://localhost:8002'; // For local testing
 const XANO_API_URL = 'https://xoho-w3ng-km3o.n7e.xano.io/api:L-QNLSmb/get_all_job_';
 const XANO_JOB_BY_ID_URL = 'https://xoho-w3ng-km3o.n7e.xano.io/api:L-QNLSmb/job';
 const XANO_CHAT_URL = 'https://xoho-w3ng-km3o.n7e.xano.io/api:wnnakKFu/aichatmessages';
@@ -65,6 +65,7 @@ function formatTimestamp(isoString) {
 }
 
 function addMessage(text, isUser = false, timestamp = new Date().toISOString()) {
+    console.log('addMessage called with text:', text, 'isUser:', isUser);
     const messageDiv = document.createElement('div');
     messageDiv.className = `message ${isUser ? 'user' : 'assistant'}`;
     
@@ -77,7 +78,10 @@ function addMessage(text, isUser = false, timestamp = new Date().toISOString()) 
     
     const text_p = document.createElement('p');
     text_p.className = 'message-text';
+    // Use textContent to safely set text without HTML interpretation
     text_p.textContent = text;
+    // Verify the text was set correctly
+    console.log('Message text set to:', text_p.textContent);
     
     const timestampDiv = document.createElement('div');
     timestampDiv.className = 'message-timestamp';
