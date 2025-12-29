@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     # OpenAI Configuration
     OPENAI_API_KEY: str
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-large"
-    OPENAI_CHAT_MODEL: str = "gpt-4-turbo-preview"
+    OPENAI_CHAT_MODEL: str = "gpt-4o-mini"
     OPENAI_TEMPERATURE: float = 0.7
     # Vector Embedding Settings (Removed - using Xano API)
     # MILVUS_HOST: str = "localhost"
