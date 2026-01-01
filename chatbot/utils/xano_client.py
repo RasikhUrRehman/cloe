@@ -3,8 +3,12 @@ Xano API Client
 Handles all interactions with Xano backend APIs
 """
 from typing import Any, Dict, List, Optional
+import os
 import requests
 from chatbot.utils.utils import setup_logging
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logger = setup_logging()
 
@@ -590,6 +594,7 @@ class XanoClient:
         company_id: Optional[str] = None,
         status: str = "Short Listed",
         session_id: Optional[int] = None,
+        profilesummary: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Create a new candidate in Xano using multipart/form-data API
@@ -604,10 +609,12 @@ class XanoClient:
             company_id: Associated company ID
             status: Application status
             session_id: Session ID
+            profilesummary: Profile summary text
             
         Returns:
             Created candidate data if successful, None otherwise
         """
+        files = None  # Initialize files to avoid UnboundLocalError in finally
         try:
             # Handle case where a single dict is passed as the first parameter
             # (legacy usage or convenience). Normalize keys to expected params.
@@ -622,6 +629,11 @@ class XanoClient:
                 company_id = payload.get("company_id") or payload.get("companyId")
                 status = payload.get("status") or payload.get("Status") or status
                 session_id = payload.get("session_id") or payload.get("sessionId") or payload.get("session") or session_id
+                profilesummary = payload.get("profilesummary") or payload.get("ProfileSummary") or profilesummary
+
+            # Ensure phone is a string if provided
+            if phone is not None and not isinstance(phone, str):
+                phone = str(phone)
 
             # Validate required param
             if not name or not isinstance(name, (str,)):
@@ -634,29 +646,28 @@ class XanoClient:
                 'Name': (None, name),
                 'Status': (None, status),
                 'session_id': (None, str(session_id) if session_id else '0'),
+                'my_session_id' : (None, "00000000-0000-0000-0000-000000000029")
             }
             
             # Add optional fields if provided
             if email:
                 form_data['Email'] = (None, email)
             if phone is not None:
-                # Only include Phone if it is purely numeric (or an int) to avoid Xano validation errors
-                try:
-                    phone_int = int(phone)
-                    form_data['Phone'] = (None, str(phone_int))
-                except Exception:
-                    logger.warning(f"Skipping non-integer phone for Xano candidate create: {phone}. Xano requires an integer value for Phone.")
+                # Ensure phone number starts with '+' for international format
+                if not phone.startswith('+'):
+                    phone = '+' + phone
+                form_data['Phone'] = (None, phone)
             if score is not None:
                 form_data['Score'] = (None, str(int(score)))
             if job_id:
                 form_data['job_id'] = (None, job_id)
             if company_id:
                 form_data['company_id'] = (None, company_id)
+            if profilesummary:
+                form_data['ProfileSummary'] = (None, profilesummary)
             
             # Handle file upload if provided
-            files = None
             if file_path:
-                import os
                 import mimetypes
                 if os.path.exists(file_path):
                     file_name = os.path.basename(file_path)
@@ -665,26 +676,44 @@ class XanoClient:
                     files = {'File': (file_name, open(file_path, 'rb'), mime_type)}
                 else:
                     logger.warning(f"File not found: {file_path}")
-            
+                    files = None
+            else:
+                # If no file_path provided, don't include File field at all
+                files = None
+
             # Prepare headers with API key authorization for candidate creation
+            x_api_key = 'sk_test_51QxA9F7C2E8B4D1A6F9C3E7B2A' #os.getenv('X_API_KEY', '')
+            logger.info(f"Using X_API_KEY: {'set' if x_api_key else 'not set'} for candidate creation")
             headers = {
-                'x-api-key': 'sk_test_51QxA9F7C2E8B4D1A6F9C3E7B2A'
+                'x-api-key': x_api_key,
             }
                 
             logger.info(f"Creating new candidate in Xano: {name}")
-            logger.debug(f"Candidate form data: {form_data}")
-            
-            # Merge form_data and files for the request (form-data format)
-            response = self.session.post(
-                url, 
-                files={**form_data, **(files or {})},
-                headers=headers,
-                timeout=self.timeout
-            )
+            logger.info("===================================")
+            logger.info(f"Candidate form data: {form_data}")
+            logger.info(f"Files to upload: {files}")
+            logger.info("===================================")
+            # Only merge files if they exist, otherwise just send form_data
+            if files:
+                response = self.session.post(
+                    url, 
+                    files={**form_data, **files},
+                    headers=headers,
+                    timeout=self.timeout
+                )
+            else:
+                response = self.session.post(
+                    url, 
+                    files=form_data,
+                    headers=headers,
+                    timeout=self.timeout
+                )
             response.raise_for_status()
             result = response.json()
+            logger.info(f"Response from Xano: {result}")
             logger.info(f"Successfully created candidate: {result.get('id', 'unknown')}")
             return result
+        
         except requests.exceptions.RequestException as e:
             logger.error(f"Error creating candidate in Xano: {e}")
             if hasattr(e, 'response') and e.response is not None:

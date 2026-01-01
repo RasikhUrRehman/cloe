@@ -26,6 +26,13 @@ REQUIREMENTS:
 - Question types to focus on: {question_types}
 - Difficulty level: {difficulty_level}
 
+MANDATORY EXPERIENCE QUESTIONS (MUST INCLUDE):
+You MUST include these specific questions to capture structured experience data:
+1. "How many years of relevant work experience do you have?" (type: experience)
+2. "What was your job title or role in your most recent position?" (type: experience)
+3. "Which company or organization were you previously employed with?" (type: experience)
+4. "What key skills or tools have you worked with in your professional experience?" (type: experience)
+
 GUIDELINES:
 1. Technical Questions: Test specific skills, tools, and knowledge mentioned in the job description
 2. Behavioral Questions: Use the STAR method format (Situation, Task, Action, Result) - start with "Tell me about a time..." or "Describe a situation..."
@@ -33,7 +40,8 @@ GUIDELINES:
 4. Experience Questions: Probe into relevant past experience and qualifications
 
 IMPORTANT:
-- Make questions specific to the role and requirements mentioned
+- ALWAYS include the 4 mandatory experience questions listed above
+- Make remaining questions specific to the role and requirements mentioned
 - Avoid generic questions that could apply to any job
 - Ensure questions are open-ended to encourage detailed responses
 - Questions should help assess candidate fit for this specific position
@@ -55,7 +63,7 @@ Generate the questions now:"""
 
 async def generate_questions_from_job_details(
     job_details: Dict[str, Any],
-    num_questions: int = 10,
+    num_questions: int = 15,
     question_types: Optional[List[str]] = None,
     difficulty_level: str = "mixed"
 ) -> List[Dict[str, str]]:
@@ -64,7 +72,7 @@ async def generate_questions_from_job_details(
     
     Args:
         job_details: Dictionary containing job information
-        num_questions: Number of questions to generate (default: 10)
+        num_questions: Number of questions to generate (default: 15, includes 4 mandatory experience questions)
         question_types: Types of questions (technical, behavioral, etc.)
         difficulty_level: Difficulty level (easy, medium, hard, mixed)
         

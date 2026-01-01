@@ -717,13 +717,11 @@ class CleoRAGAgent:
             # Extract application information using simple patterns
             if self._extract_application_info(user_message, app):
                 state_changed = True
-            # Check if application is complete and trigger fit score calculation + candidate creation
+            # Check if application is complete and trigger candidate creation
             if self._is_application_complete(app):
                 if not app.stage_completed:
                     app.application_status = "submitted"
                     app.stage_completed = True
-                    # Calculate fit score and save application
-                    self._calculate_and_save_fit_score()
                     # Create candidate immediately upon application completion
                     self._create_candidate_immediately()
                     # Transition to verification stage to prompt for verification
@@ -915,37 +913,8 @@ class CleoRAGAgent:
         if state_changed:
             logger.info("Proactive information extraction completed")
         return state_changed
-    def _calculate_and_save_fit_score(self):
-        """Calculate fit score when application is complete, but DO NOT generate report or candidate here."""
-        try:
-            from chatbot.utils.fit_score import FitScoreCalculator
-            # Get chat history for personality analysis
-            chat_history = []
-            if self.memory and hasattr(self.memory, 'chat_memory'):
-                for message in self.memory.chat_memory.messages:
-                    chat_history.append({
-                        "role": "human" if message.type == "human" else "ai",
-                        "content": message.content,
-                    })
-            calculator = FitScoreCalculator(llm=self.llm)
-            fit_score = calculator.calculate_fit_score(
-                qualification=self.session_state.qualification,
-                application=self.session_state.application,
-                chat_history=chat_history,
-                verification=self.session_state.verification,
-            )
-            logger.info(f"Fit score calculated: {fit_score.total_score:.2f}/100 (deferred report/candidate creation)")
-            # Store fit score in memory for later use
-            try:
-                if self.session_state.engagement:
-                    setattr(self.session_state.engagement, 'last_fit_score', fit_score.total_score)
-            except Exception:
-                logger.debug("Could not attach last_fit_score to session_state.engagement; skipping")
-        except Exception as e:
-            logger.error(f"Error calculating fit score: {e}")
-            import traceback
-            traceback.print_exc()
-            # Don't let fit score calculation failure prevent state progression
+    
+    # Removed _calculate_and_save_fit_score - fit score is now calculated during report generation
 
     def _create_candidate_immediately(self):
         """

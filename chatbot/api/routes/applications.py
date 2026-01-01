@@ -18,7 +18,6 @@ from reportlab.lib.units import inch
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from chatbot.utils.config import settings
-from chatbot.utils.fit_score import FitScoreCalculator
 from chatbot.utils.utils import setup_logging
 from chatbot.utils.xano_client import get_xano_client
 from chatbot.utils.session_manager import get_session_manager

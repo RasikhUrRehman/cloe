@@ -100,8 +100,7 @@ class CleoApplication:
 
         session_id = self.agent.session_state.session_id
         return self.report_generator.generate_report(
-            session_id=session_id,
-            include_fit_score=include_fit_score
+            session_id=session_id
         )
 
     def run_interactive(self):

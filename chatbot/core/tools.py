@@ -14,7 +14,6 @@ from chatbot.utils.utils import setup_logging
 from chatbot.utils.config import settings
 from langchain_openai import ChatOpenAI
 from chatbot.utils.xano_client import get_xano_client
-from chatbot.utils.fit_score import FitScoreCalculator, FitScoreComponents
 from chatbot.utils.report_generator import ReportGenerator
 
 if TYPE_CHECKING:
@@ -46,7 +45,6 @@ class AgentToolkit:
         self.xano_client = get_xano_client()
         self._session_concluded = False  # Track if session has been concluded
         self._candidate_created = False  # Track if candidate has been created
-        self._fit_score_calculator = FitScoreCalculator()
         self._report_generator = ReportGenerator(xano_client=self.xano_client)
         logger.info(f"AgentToolkit initialized for session {session_state.session_id}, job_id: {job_id}")
         # Ensure Application state exists so candidate contact details can be stored reliably
@@ -84,97 +82,54 @@ class AgentToolkit:
         logger.info(f"State milestone saved: {milestone} for session {self.session_state.session_id}")
         return f"State tracked in memory for session {self.session_state.session_id}: {milestone}"
     
-    def _calculate_fit_score(self) -> FitScoreComponents:
+    def _generate_report_and_extract_data(self) -> tuple[Optional[str], float, str]:
         """
-        Calculate the fit score for the current candidate based on session state.
+        Generate PDF report and extract fit_score and profile_summary.
         
         Returns:
-            FitScoreComponents with all score details
-        """
-        try:
-            # Get qualification and application states
-            qualification = self.session_state.qualification
-            application = self.session_state.application
-            
-            # Calculate fit score using the shared calculator
-            fit_score_result = self._fit_score_calculator.calculate_fit_score(
-                qualification=qualification,
-                application=application,
-                chat_history=None  # Chat history would require access to conversation
-            )
-            
-            logger.info(f"Calculated fit score: {fit_score_result.total_score:.2f}")
-            return fit_score_result
-        except Exception as e:
-            logger.error(f"Error calculating fit score: {e}")
-            # Return default score components on error
-            return FitScoreComponents(
-                qualification_score=0.0,
-                experience_score=0.0,
-                personality_score=0.0,
-                total_score=0.0,
-                breakdown={}
-            )
-    
-    def _generate_pdf_report(self, fit_score: FitScoreComponents) -> Optional[str]:
-        """
-        Generate PDF summary report for the session.
-        
-        Args:
-            fit_score: Pre-calculated fit score components
-            
-        Returns:
-            Path to generated PDF file, or None on error
+            Tuple of (pdf_path, fit_score, profile_summary)
         """
         try:
             session_id = self.session_state.session_id
+            xano_session_id = None
             
-            # Build application data from session state for report generator
-            app_data = {
-                'engagement': {},
-                'qualification': {},
-                'application': {},
-                'verification': {},
-                'fit_score': {
-                    'total_score': fit_score.total_score,
-                    'qualification_score': fit_score.qualification_score,
-                    'experience_score': fit_score.experience_score,
-                    'personality_score': fit_score.personality_score,
-                    'breakdown': fit_score.breakdown
-                }
-            }
-            
-            # Populate from session state if available
+            # Get xano_session_id from engagement state
             if self.session_state.engagement:
-                app_data['engagement'] = self.session_state.engagement.model_dump()
-            if self.session_state.qualification:
-                app_data['qualification'] = self.session_state.qualification.model_dump()
-            if self.session_state.application:
-                app_data['application'] = self.session_state.application.model_dump()
-            if self.session_state.verification:
-                app_data['verification'] = self.session_state.verification.model_dump()
+                xano_session_id = self.session_state.engagement.xano_session_id
             
-            # Generate report
-            result = self._report_generator.generate_report(
-                session_id=session_id,
-                include_fit_score=True,
-                app_data=app_data
-            )
-            
-            pdf_path = result.get('pdf_report')
-            logger.info(f"Generated PDF report for session {session_id}: {pdf_path}")
-            return pdf_path
+            # If we have a Xano session ID, use it to generate the report
+            if xano_session_id:
+                logger.info(f"Generating report for Xano session {xano_session_id}")
+                
+                result = self._report_generator.generate_report(
+                    session_id=str(xano_session_id)
+                )
+                
+                pdf_path = result.get('pdf_report')
+                fit_score = result.get('fit_score', 0)
+                profile_summary = result.get('profile_summary', '')
+                
+                logger.info(f"Generated PDF report for Xano session {xano_session_id}: {pdf_path}")
+                logger.info(f"Extracted fit_score: {fit_score}, profile_summary length: {len(profile_summary)}")
+                return pdf_path, fit_score, profile_summary
+            else:
+                logger.warning(f"No Xano session ID available for session {session_id}, cannot generate report")
+                return None, 0, ''
+                
         except Exception as e:
-            logger.error(f"Error generating PDF report: {e}")
-            return None
+            logger.error(f"Error generating report: {e}")
+            import traceback
+            traceback.print_exc()
+            return None, 0, ''
     
-    def _create_candidate_on_conclude(self, fit_score: FitScoreComponents, pdf_path: Optional[str]) -> Optional[int]:
+    def _create_candidate_on_conclude(self, fit_score: float, profile_summary: str, pdf_path: Optional[str]) -> Optional[int]:
         """
         Create candidate record when session concludes.
         This is called only once when the session ends.
         
         Args:
-            fit_score: Pre-calculated fit score components
+            fit_score: Fit score value from report generation
+            profile_summary: Profile summary/explanation from report generation
             pdf_path: Path to generated PDF report
             
         Returns:
@@ -270,19 +225,20 @@ class AgentToolkit:
                 else:
                     logger.warning(f"Failed to retrieve company_id from job {job_id}")
             
-            logger.info(f"Creating candidate {name} with score {fit_score.total_score:.2f}")
+            logger.info(f"Creating candidate {name} with score {fit_score}")
             
             # Create candidate in Xano with fit score and PDF
             candidate = self.xano_client.create_candidate(
                 name=name or "unable to fetch",
                 email=email_clean,
                 phone=phone_clean,
-                score=fit_score.total_score,
+                score=fit_score,
                 file_path=pdf_path,
                 job_id=job_id,
                 company_id=company_id,
                 session_id=xano_session_id,
-                status="Short Listed"
+                status="Short Listed",
+                profilesummary=profile_summary
             )
 
             logger.info("========================================")
@@ -305,15 +261,15 @@ class AgentToolkit:
                     if xano_session_id:
                         self.xano_client.update_session(xano_session_id, {"candidate_id": candidate_id})
                 
-                logger.info(f"Created candidate {candidate_id} for session {self.session_state.session_id} with score {fit_score.total_score:.2f}")
+                logger.info(f"Created candidate {candidate_id} for session {self.session_state.session_id} with score {fit_score:.2f}")
                 
                 # Delete the local PDF report after successful candidate creation
-                if pdf_path and os.path.exists(pdf_path):
-                    try:
-                        os.remove(pdf_path)
-                        logger.info(f"Deleted local PDF report: {pdf_path}")
-                    except Exception as e:
-                        logger.warning(f"Failed to delete local PDF report {pdf_path}: {e}")
+                # if pdf_path and os.path.exists(pdf_path):
+                #     try:
+                #         os.remove(pdf_path)
+                #         logger.info(f"Deleted local PDF report: {pdf_path}")
+                #     except Exception as e:
+                #         logger.warning(f"Failed to delete local PDF report {pdf_path}: {e}")
                 
                 return candidate_id
             else:
@@ -373,10 +329,9 @@ class AgentToolkit:
         or when the session times out.
         
         This method:
-        1. Calculates the fit score
-        2. Generates a PDF summary report
-        3. Creates the candidate record with score and PDF
-        4. Updates the session status in Xano
+        1. Generates a PDF report and extracts fit score and profile summary
+        2. Creates the candidate record with score, profile summary, and PDF
+        3. Updates the session status in Xano
         
         Args:
             reason: The reason for concluding the session (e.g., "User said goodbye", "Session timed out")
@@ -402,16 +357,13 @@ class AgentToolkit:
             else:
                 final_status = "Ended - Early Exit"
             
-            # Step 1: Calculate fit score (only once)
-            fit_score = self._calculate_fit_score()
-            logger.info(f"Session conclude - Fit score calculated: {fit_score.total_score:.2f}")
-            
-            # Step 2: Generate PDF report (uses pre-calculated fit score)
-            pdf_path = self._generate_pdf_report(fit_score)
+            # Step 1: Generate PDF report and extract fit score and profile summary
+            pdf_path, fit_score, profile_summary = self._generate_report_and_extract_data()
             if pdf_path:
                 logger.info(f"Session conclude - PDF report generated: {pdf_path}")
+            logger.info(f"Session conclude - Fit score extracted: {fit_score:.2f}")
             
-            # Step 3: Create candidate if we have contact info (uses pre-calculated fit score and PDF)
+            # Step 2: Create candidate if we have contact info
             candidate_id = None
 
             # Identify missing fields
@@ -473,13 +425,13 @@ class AgentToolkit:
                 if not re.match(email_pattern, email):
                     logger.warning(f"Email format invalid: '{email}'. Agent should validate email during conversation.")
                 
-                candidate_id = self._create_candidate_on_conclude(fit_score, pdf_path)
+                candidate_id = self._create_candidate_on_conclude(fit_score, profile_summary, pdf_path)
             else:
                 logger.warning("Candidate will not be created on conclude: missing name, email, or phone")
                 if candidate_id:
                     logger.info(f"Session conclude - Candidate created: {candidate_id}")
             
-            # Step 4: Update session in Xano
+            # Step 3: Update session in Xano
             if xano_session_id:
                 update_data = {
                     "Status": final_status,
@@ -523,14 +475,11 @@ class AgentToolkit:
                 and self.session_state.application.email
                 and self.session_state.application.phone_number
             ):
-                # Calculate fit score
-                fit_score = self._calculate_fit_score()
-                
-                # Generate PDF report
-                pdf_path = self._generate_pdf_report(fit_score)
+                # Generate report and extract fit score and profile summary
+                pdf_path, fit_score, profile_summary = self._generate_report_and_extract_data()
                 
                 # Create candidate
-                candidate_id = self._create_candidate_on_conclude(fit_score, pdf_path)
+                candidate_id = self._create_candidate_on_conclude(fit_score, profile_summary, pdf_path)
                 
                 if candidate_id:
                     logger.info(f"Candidate created successfully: {candidate_id}")
