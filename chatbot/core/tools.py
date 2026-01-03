@@ -264,12 +264,13 @@ class AgentToolkit:
                 logger.info(f"Created candidate {candidate_id} for session {self.session_state.session_id} with score {fit_score:.2f}")
                 
                 # Delete the local PDF report after successful candidate creation
-                # if pdf_path and os.path.exists(pdf_path):
-                #     try:
-                #         os.remove(pdf_path)
-                #         logger.info(f"Deleted local PDF report: {pdf_path}")
-                #     except Exception as e:
-                #         logger.warning(f"Failed to delete local PDF report {pdf_path}: {e}")
+                if pdf_path and os.path.exists(pdf_path):
+                    try:
+                        os.remove(pdf_path)
+                        logger.info(f"Deleted local PDF report: {pdf_path}")
+                    except Exception as e:
+                        logger.warning(f"Failed to delete local PDF report {pdf_path}: {e}")
+                
                 
                 return candidate_id
             else:
