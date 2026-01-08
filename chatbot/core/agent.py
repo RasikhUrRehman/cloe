@@ -138,7 +138,7 @@ class CleoRAGAgent:
             tools=self.tools,
             memory=self.memory,
             verbose=True,
-            max_iterations=5,
+            max_iterations=15,  # Increased to allow multiple tool calls per turn
             handle_parsing_errors=True,
             callbacks=callbacks,
         )

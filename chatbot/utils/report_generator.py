@@ -64,7 +64,9 @@ class ReportGenerator:
         
         if "fit_score" in report_data:
             fit_score_value = report_data["fit_score"].get("total_score", 0)
-            profile_summary = report_data["fit_score"].get("explanation", "")
+            # Pass entire report JSON as string for profile_summary (as per requirement)
+            import json
+            profile_summary = json.dumps(report_data, indent=2)
 
         logger.info(f"Generated reports for session {session_id}")
         return {

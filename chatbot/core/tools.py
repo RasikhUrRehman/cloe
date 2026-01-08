@@ -801,6 +801,259 @@ class AgentToolkit:
             logger.error(f"Error saving name: {e}")
             return f"✗ Failed to save name. Please try again."
 
+    def save_age(self, age: int) -> str:
+        """
+        Save the candidate's age to application state.
+        
+        Args:
+            age: The age provided by the candidate
+            
+        Returns:
+            Success message confirming the age was saved
+        """
+        try:
+            from chatbot.state.states import ApplicationState
+            
+            # Ensure application state exists
+            if not self.session_state.application:
+                self.session_state.application = ApplicationState(session_id=self.session_state.session_id)
+            
+            # Save age
+            self.session_state.application.age = age
+            logger.info(f"Age saved: {age}")
+            
+            return f"✓ Age saved: {age}"
+            
+        except Exception as e:
+            logger.error(f"Error saving age: {e}")
+            return f"✗ Failed to save age. Please try again."
+
+    def create_candidate_early(self) -> str:
+        """
+        Create candidate record immediately with basic information (name, email, phone, age).
+        This is called early in the conversation, without generating a report.
+        The report will be generated and patched later when the session concludes.
+        
+        Returns:
+            Success message with candidate ID, or error message
+        """
+        try:
+            # Check if candidate already exists
+            if self._candidate_created:
+                logger.info("Candidate already created for this session")
+                if self.session_state.engagement and self.session_state.engagement.candidate_id:
+                    return f"✓ Candidate already created with ID: {self.session_state.engagement.candidate_id}"
+                return "✓ Candidate already exists for this session"
+            
+            # Validate required fields are present
+            if not self.session_state.application:
+                return "✗ Cannot create candidate: No application data available"
+            
+            app = self.session_state.application
+            if not app.full_name or not app.email or not app.phone_number:
+                missing = []
+                if not app.full_name:
+                    missing.append("name")
+                if not app.email:
+                    missing.append("email")
+                if not app.phone_number:
+                    missing.append("phone")
+                return f"✗ Cannot create candidate: Missing {', '.join(missing)}"
+            
+            # Validate email format
+            email_pattern = r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}$"
+            if not re.match(email_pattern, app.email.strip()):
+                return f"✗ Invalid email format: {app.email}"
+            
+            # Get job_id and company_id
+            job_id = self.job_id
+            company_id = None
+            xano_session_id = None
+            
+            if self.session_state.engagement:
+                if not job_id:
+                    job_id = self.session_state.engagement.job_id
+                company_id = self.session_state.engagement.company_id
+                xano_session_id = self.session_state.engagement.xano_session_id
+            
+            # Validate and fetch job_id if needed
+            if job_id and not self._is_valid_uuid(job_id):
+                logger.warning(f"job_id '{job_id}' is not a valid UUID. Attempting to fetch from Xano...")
+                job_data = self.xano_client.get_job_by_id(job_id)
+                if job_data and 'id' in job_data:
+                    job_id = str(job_data['id'])
+                    logger.info(f"Retrieved UUID job_id from Xano: {job_id}")
+                    if not company_id and 'company_id' in job_data:
+                        company_id = job_data['company_id']
+                else:
+                    logger.error(f"Failed to retrieve valid job_id")
+                    job_id = None
+            
+            # Fetch company_id if missing
+            if not company_id and job_id:
+                job_data = self.xano_client.get_job_by_id(job_id)
+                if job_data and '_related_company' in job_data:
+                    company_id = job_data['_related_company']['id']
+                    logger.info(f"Retrieved company_id from job data: {company_id}")
+            
+            # Sanitize phone number
+            phone_clean = None
+            if app.phone_number:
+                try:
+                    digits = ''.join(filter(str.isdigit, str(app.phone_number)))
+                    if digits:
+                        phone_clean = digits
+                except Exception:
+                    phone_clean = None
+            
+            logger.info(f"Creating candidate early: {app.full_name}")
+            
+            # Create candidate WITHOUT report (score=0, no file_path)
+            candidate = self.xano_client.create_candidate(
+                name=app.full_name,
+                email=app.email.strip().lower(),
+                phone=phone_clean,
+                score=0,  # No score yet
+                file_path=None,  # No report yet
+                job_id=job_id,
+                company_id=company_id,
+                session_id=xano_session_id,
+                status="Short Listed",  # Status indicates candidate is in progress
+                profilesummary=None  # No profile summary yet
+            )
+            
+            if candidate:
+                candidate_id = candidate.get('id')
+                user_id = candidate.get('user_id')
+                self._candidate_created = True
+                
+                # Store in engagement state
+                if self.session_state.engagement:
+                    self.session_state.engagement.candidate_id = candidate_id
+                    if user_id:
+                        self.session_state.engagement.user_id = user_id
+                        logger.info(f"Saved user_id {user_id} for candidate {candidate_id}")
+                    
+                    # Update session with candidate_id
+                    if xano_session_id:
+                        self.xano_client.update_session(xano_session_id, {"candidate_id": candidate_id})
+                
+                logger.info(f"Created candidate {candidate_id} early without report")
+                return f"✓ Candidate created successfully with ID: {candidate_id}"
+            else:
+                return "✗ Failed to create candidate in system"
+                
+        except Exception as e:
+            logger.error(f"Error creating candidate early: {e}")
+            import traceback
+            traceback.print_exc()
+            return f"✗ Error creating candidate: {str(e)}"
+
+    def patch_candidate_with_report(self) -> str:
+        """
+        Generate report and patch the existing candidate with complete information.
+        This is called at the end of the conversation to update the candidate with their report.
+        
+        Returns:
+            Success message or error message
+        """
+        try:
+            # Check if candidate exists
+            if not self.session_state.engagement or not self.session_state.engagement.candidate_id:
+                return "✗ Cannot patch candidate: No candidate ID found. Create candidate first."
+            
+            candidate_id = self.session_state.engagement.candidate_id
+            
+            # Generate report
+            pdf_path, fit_score, profile_summary = self._generate_report_and_extract_data()
+            
+            if not pdf_path:
+                logger.warning("No PDF report generated, patching with score and summary only")
+            
+            # Get session info
+            xano_session_id = None
+            if self.session_state.engagement:
+                xano_session_id = self.session_state.engagement.xano_session_id
+            
+            # Patch candidate with complete data
+            result = self.xano_client.patch_candidate_complete(
+                candidate_id=candidate_id,
+                score=fit_score,
+                report_pdf=pdf_path,
+                status="Short Listed",
+                profile_summary=profile_summary,
+                session_id=xano_session_id
+            )
+            
+            if result:
+                logger.info(f"Successfully patched candidate {candidate_id} with report (score: {fit_score})")
+                
+                # Delete local PDF after successful patch
+                if pdf_path and os.path.exists(pdf_path):
+                    try:
+                        os.remove(pdf_path)
+                        logger.info(f"Deleted local PDF report: {pdf_path}")
+                    except Exception as e:
+                        logger.warning(f"Failed to delete local PDF: {e}")
+                
+                return f"✓ Candidate report generated and updated (Fit Score: {fit_score:.0f}%)"
+            else:
+                return "✗ Failed to update candidate with report"
+                
+        except Exception as e:
+            logger.error(f"Error patching candidate with report: {e}")
+            import traceback
+            traceback.print_exc()
+            return f"✗ Error updating candidate: {str(e)}"
+
+    def update_candidate_email(self, new_email: str) -> str:
+        """
+        Update the candidate's email address.
+        Use this when the user provides a corrected email address.
+        
+        Args:
+            new_email: The new email address
+            
+        Returns:
+            Success message or error message
+        """
+        try:
+            # Validate email format
+            email_pattern = r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}$"
+            if not re.match(email_pattern, new_email.strip()):
+                return f"✗ Invalid email format: {new_email}"
+            
+            # Update in application state
+            if self.session_state.application:
+                self.session_state.application.email = new_email.strip().lower()
+                logger.info(f"Updated email in application state: {new_email}")
+            
+            # If candidate already created, patch in Xano
+            if self.session_state.engagement and self.session_state.engagement.candidate_id:
+                candidate_id = self.session_state.engagement.candidate_id
+                
+                result = self.xano_client.patch_candidate_email(
+                    candidate_id=candidate_id,
+                    email=new_email.strip().lower()
+                )
+                
+                if result:
+                    logger.info(f"Updated candidate {candidate_id} email to: {new_email}")
+                    # Reset email verification since email changed
+                    if self.session_state.verification:
+                        self.session_state.verification.email_verified = False
+                        self.session_state.verification.email_for_verification = None
+                    return f"✓ Email updated to: {new_email}. Please verify the new email."
+                else:
+                    return "✗ Failed to update email in system"
+            else:
+                # Candidate not created yet, just update state
+                return f"✓ Email updated to: {new_email}"
+                
+        except Exception as e:
+            logger.error(f"Error updating candidate email: {e}")
+            return f"✗ Error updating email: {str(e)}"
+
     def get_tools(self) -> List[StructuredTool]:
         """
         Get all tools bound to this toolkit's session state.
@@ -815,39 +1068,69 @@ class AgentToolkit:
                 description="Save the current conversation state to persistent storage. Use this to save key conversation milestones like when user starts application, shares resume, or agrees to proceed.",
             ),
             StructuredTool.from_function(
-                func=self.save_phone_number,
-                name="save_phone_number",
+                func=self.save_name,
+                name="save_name",
                 description=(
-                    "Save the candidate's phone number. Call this when the user provides their phone number. "
-                    "The agent should extract the phone number from the user's message and call this tool with the cleaned phone number. "
-                    "Input: phone_number (e.g., '555-123-4567', '+1-555-123-4567')"
+                    "Save the candidate's full name (first and last name). Call this IMMEDIATELY when the user provides their name. "
+                    "Extract the full name from the user's message and call this tool. "
+                    "IMPORTANT: Only call this when you have BOTH first name AND last name. If user only provides first name, ask for the last name. "
+                    "Input: full_name (e.g., 'John Smith', 'Sarah Johnson')"
                 ),
             ),
             StructuredTool.from_function(
                 func=self.save_email,
                 name="save_email",
                 description=(
-                    "Save the candidate's email address. Call this when the user provides their email. "
-                    "The agent should extract the email from the user's message and call this tool with the email address. "
+                    "Save the candidate's email address. Call this IMMEDIATELY when the user provides their email. "
+                    "Extract the email from the user's message and call this tool with the email address. "
                     "Input: email (e.g., 'john.doe@example.com')"
                 ),
             ),
             StructuredTool.from_function(
-                func=self.save_name,
-                name="save_name",
+                func=self.save_phone_number,
+                name="save_phone_number",
                 description=(
-                    "Save the candidate's full name (first and last name). Call this when the user provides their name. "
-                    "The agent should extract the full name from the user's message and call this tool. "
-                    "IMPORTANT: Only call this when you have BOTH first name AND last name. If user only provides first name, ask for the last name. "
-                    "Input: full_name (e.g., 'John Smith', 'Sarah Johnson')"
+                    "Save the candidate's phone number. Call this IMMEDIATELY when the user provides their phone number. "
+                    "Extract the phone number from the user's message and call this tool with the cleaned phone number. "
+                    "Input: phone_number (e.g., '555-123-4567', '+1-555-123-4567')"
+                ),
+            ),
+            StructuredTool.from_function(
+                func=self.save_age,
+                name="save_age",
+                description=(
+                    "Save the candidate's age. Call this IMMEDIATELY when the user provides their age. "
+                    "Extract the age from the user's message and call this tool. "
+                    "Input: age (integer, e.g., 25, 30)"
+                ),
+            ),
+            StructuredTool.from_function(
+                func=self.create_candidate_early,
+                name="create_candidate_early",
+                description=(
+                    "Create candidate record in the system with basic information (name, email, phone, age). "
+                    "Call this AFTER you have collected and validated ALL of: name, email, phone, and age. "
+                    "This creates the candidate WITHOUT generating a report - the report will be added later. "
+                    "The candidate record is needed before sending verification codes. "
+                    "Do NOT call this multiple times - check if candidate is already created first."
+                ),
+            ),
+            StructuredTool.from_function(
+                func=self.update_candidate_email,
+                name="update_candidate_email",
+                description=(
+                    "Update the candidate's email address if they provide a correction. "
+                    "Use this when the user says their email was wrong or provides a different email. "
+                    "This updates both the application state and the candidate record in the system. "
+                    "Input: new_email (the corrected email address)"
                 ),
             ),
             StructuredTool.from_function(
                 func=self.send_email_verification_code,
                 name="send_email_verification_code",
                 description=(
-                    "Send email verification code to candidate. Call this after asking if user is available for email verification. "
-                    "The system will send a verification code to their email and store it for later validation. "
+                    "Send email verification code to candidate. Call this after the candidate is created and you've asked if they're ready for email verification. "
+                    "The system will send a verification code to their email. "
                     "Input: candidate's email address."
                 ),
             ),
@@ -855,8 +1138,7 @@ class AgentToolkit:
                 func=self.validate_email_verification,
                 name="validate_email_verification",
                 description=(
-                    "Validate the email verification code provided by the user. Call this after user enters the code they received. "
-                    "If code is valid, email is marked as verified. "
+                    "Validate the email verification code provided by the user. Call this after user enters the code they received via email. "
                     "Input: user_id (from email send response) and the 6-digit code user provided."
                 ),
             ),
@@ -864,8 +1146,8 @@ class AgentToolkit:
                 func=self.send_phone_verification_code,
                 name="send_phone_verification_code",
                 description=(
-                    "Send phone verification code to candidate. Call this after asking if user is available for phone verification. "
-                    "The system will send a verification code to their phone and store it for later validation. "
+                    "Send phone verification code to candidate. Call this after the candidate is created and you've asked if they're ready for phone verification. "
+                    "The system will send a verification code to their phone. "
                     "Input: candidate's phone number."
                 ),
             ),
@@ -873,19 +1155,27 @@ class AgentToolkit:
                 func=self.validate_phone_verification,
                 name="validate_phone_verification",
                 description=(
-                    "Validate the phone verification code provided by the user. Call this after user enters the code they received. "
-                    "If code is valid, phone is marked as verified. "
+                    "Validate the phone verification code provided by the user. Call this after user enters the code they received via phone. "
                     "Input: user_id (from phone send response) and the 6-digit code user provided."
+                ),
+            ),
+            StructuredTool.from_function(
+                func=self.patch_candidate_with_report,
+                name="patch_candidate_with_report",
+                description=(
+                    "Generate the final report and update the candidate with their fit score and profile summary. "
+                    "Call this AFTER the conversation is complete and you have gathered all necessary information. "
+                    "This generates the PDF report, calculates fit score, and updates the candidate record. "
+                    "Typically called just before concluding the session."
                 ),
             ),
             StructuredTool.from_function(
                 func=self.conclude_session,
                 name="conclude_session",
                 description=(
-                    "Use this tool when the user indicates they want to end the conversation (e.g., says goodbye, thanks and leaves, needs to go, will think about it). "
-                    "IMPORTANT: Before calling this, you MUST have collected the candidate's NAME, PHONE NUMBER, and EMAIL ADDRESS. "
-                    "This tool calculates fit score, generates a report, and creates the candidate record. "
-                    "Input should be the reason for ending (e.g., 'User said goodbye', 'User needs time to decide', 'User completed application')."
+                    "End the conversation session. Call this when the user indicates they want to leave (goodbye, thanks, need to go). "
+                    "IMPORTANT: Before calling this, ensure the candidate report has been generated (call patch_candidate_with_report if needed). "
+                    "Input: reason for ending (e.g., 'User said goodbye', 'User completed application')."
                 ),
             ),
         ]

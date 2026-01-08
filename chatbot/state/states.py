@@ -54,6 +54,7 @@ class ApplicationState(BaseModel):
     full_name: Optional[str] = None
     phone_number: Optional[str] = None
     email: Optional[str] = None
+    age: Optional[int] = None
     address: Optional[str] = None
     previous_employer: Optional[str] = None
     job_title: Optional[str] = None
