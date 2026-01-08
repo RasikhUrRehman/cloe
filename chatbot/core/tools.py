@@ -163,15 +163,18 @@ class AgentToolkit:
                 else:
                     logger.warning(f"Invalid email format: {email}. Skipping email field.")
 
-            # Sanitize phone: only include digits. If digits-only, pass as integer; otherwise skip.
+            # Sanitize phone: preserve + sign if present, extract digits
             phone_clean = None
             if phone:
                 try:
-                    # Extract digits only (strip +, -, spaces, parentheses, etc.)
-                    digits = ''.join(filter(str.isdigit, str(phone)))
+                    stripped = str(phone).strip()
+                    # Check if phone starts with +
+                    has_plus = stripped.startswith('+')
+                    # Extract digits only (strip -, spaces, parentheses, etc.)
+                    digits = ''.join(filter(str.isdigit, stripped))
                     if digits:
-                        # Convert to int for Xano's integer field
-                        phone_clean = int(digits)
+                        # Add + sign back if it was present
+                        phone_clean = f"+{digits}" if has_plus else digits
                 except Exception:
                     phone_clean = None
             
@@ -228,6 +231,9 @@ class AgentToolkit:
             logger.info(f"Creating candidate {name} with score {fit_score}")
             
             # Create candidate in Xano with fit score and PDF
+            # Ensure profile_summary is a string (should already be JSON string from report generator)
+            profile_summary_str = profile_summary if isinstance(profile_summary, str) else str(profile_summary)
+            
             candidate = self.xano_client.create_candidate(
                 name=name or "unable to fetch",
                 email=email_clean,
@@ -238,7 +244,7 @@ class AgentToolkit:
                 company_id=company_id,
                 session_id=xano_session_id,
                 status="Short Listed",
-                profilesummary=profile_summary
+                profilesummary=profile_summary_str
             )
 
             logger.info("========================================")
@@ -324,6 +330,55 @@ class AgentToolkit:
             logger.error(f"Error checking contact info: {e}")
             return False
 
+    def _sync_application_data_to_xano(self) -> bool:
+        """
+        Sync application state data (name, email, phone) to Xano session.
+        This ensures contact information is persisted and available even after session timeout.
+        
+        Returns:
+            True if sync was successful, False otherwise
+        """
+        try:
+            if not self.session_state.engagement or not self.session_state.engagement.xano_session_id:
+                logger.warning("Cannot sync application data to Xano: No Xano session ID found")
+                return False
+            
+            if not self.session_state.application:
+                logger.warning("Cannot sync application data to Xano: No application state found")
+                return False
+            
+            xano_session_id = self.session_state.engagement.xano_session_id
+            app = self.session_state.application
+            
+            # Prepare update data with application fields
+            update_data = {}
+            
+            if app.full_name:
+                update_data["candidate_name"] = app.full_name
+            if app.email:
+                update_data["candidate_email"] = app.email
+            if app.phone_number:
+                update_data["candidate_phone"] = app.phone_number
+            if app.age:
+                update_data["candidate_age"] = app.age
+            
+            # Only update if we have data to sync
+            if update_data:
+                result = self.xano_client.update_session(xano_session_id, update_data)
+                if result:
+                    logger.info(f"Synced application data to Xano session {xano_session_id}: {list(update_data.keys())}")
+                    return True
+                else:
+                    logger.warning(f"Failed to sync application data to Xano session {xano_session_id}")
+                    return False
+            else:
+                logger.debug("No application data to sync to Xano")
+                return True
+                
+        except Exception as e:
+            logger.error(f"Error syncing application data to Xano: {e}")
+            return False
+
     def conclude_session(self, reason: str) -> str:
         """
         Conclude the current session when the user indicates they want to end the conversation
@@ -364,8 +419,79 @@ class AgentToolkit:
                 logger.info(f"Session conclude - PDF report generated: {pdf_path}")
             logger.info(f"Session conclude - Fit score extracted: {fit_score:.2f}")
             
-            # Step 2: Create candidate if we have contact info
+            # Step 2: Check if candidate already exists, then patch or create
             candidate_id = None
+            
+            # Check if candidate was already created earlier (e.g., during verification)
+            if self.session_state.engagement and self.session_state.engagement.candidate_id:
+                candidate_id = self.session_state.engagement.candidate_id
+                logger.info(f"Candidate already exists (ID: {candidate_id}), will patch with report data")
+                
+                # Patch existing candidate with report data
+                try:
+                    # Ensure profile_summary is a string (should already be JSON string from report generator)
+                    profile_summary_str = profile_summary if isinstance(profile_summary, str) else str(profile_summary)
+                    
+                    result = self.xano_client.patch_candidate_complete(
+                        candidate_id=candidate_id,
+                        score=fit_score,
+                        profile_summary=profile_summary_str,
+                        status="Short Listed",
+                        session_id=self.session_state.engagement.xano_session_id if self.session_state.engagement else None
+                    )
+                    
+                    if result:
+                        logger.info(f"Successfully patched candidate {candidate_id} with report data (score: {fit_score:.2f})")
+                        
+                        # Upload PDF if available
+                        if pdf_path and os.path.exists(pdf_path):
+                            upload_result = self.xano_client.upload_candidate_report_pdf(candidate_id, pdf_path)
+                            if upload_result:
+                                logger.info(f"Successfully uploaded PDF report for candidate {candidate_id}")
+                                # Delete local PDF after successful upload
+                                try:
+                                    os.remove(pdf_path)
+                                    logger.info(f"Deleted local PDF report: {pdf_path}")
+                                except Exception as e:
+                                    logger.warning(f"Failed to delete local PDF report {pdf_path}: {e}")
+                            else:
+                                logger.warning(f"Failed to upload PDF report for candidate {candidate_id}")
+                    else:
+                        logger.warning(f"Failed to patch candidate {candidate_id} with report data")
+                except Exception as e:
+                    logger.error(f"Error patching candidate {candidate_id}: {e}")
+            else:
+                # No existing candidate, need to create one
+                logger.info("No existing candidate found, will create new candidate if contact info available")
+
+            # First, try to load contact info from Xano session data (in case it was synced earlier)
+            if self.session_state.engagement and self.session_state.engagement.xano_session_id:
+                xano_session_id = self.session_state.engagement.xano_session_id
+                try:
+                    xano_session = self.xano_client.get_session_by_id(xano_session_id)
+                    if xano_session:
+                        # Load contact info from Xano into application state if not already present
+                        from chatbot.state.states import ApplicationState
+                        if not self.session_state.application:
+                            self.session_state.application = ApplicationState(session_id=self.session_state.session_id)
+                        
+                        app = self.session_state.application
+                        
+                        # Restore from Xano if local state is missing
+                        if not app.full_name and xano_session.get("candidate_name"):
+                            app.full_name = xano_session["candidate_name"]
+                            logger.info(f"Restored name from Xano: {app.full_name}")
+                        if not app.email and xano_session.get("candidate_email"):
+                            app.email = xano_session["candidate_email"]
+                            logger.info(f"Restored email from Xano: {app.email}")
+                        if not app.phone_number and xano_session.get("candidate_phone"):
+                            app.phone_number = xano_session["candidate_phone"]
+                            logger.info(f"Restored phone from Xano: {app.phone_number}")
+                        if not app.age and xano_session.get("candidate_age"):
+                            app.age = xano_session["candidate_age"]
+                            logger.info(f"Restored age from Xano: {app.age}")
+                except Exception as e:
+                    logger.debug(f"Could not load session data from Xano: {e}")
 
             # Identify missing fields
             missing = []
@@ -404,33 +530,35 @@ class AgentToolkit:
                     except Exception as e:
                         logger.debug(f"Failed to prompt agent for contact info: {e}")
 
-            # Finally, attempt to create candidate if all required fields are present
-            if (
-                self.session_state.application
-                and not self._candidate_created
-                and self.session_state.application.full_name
-                and self.session_state.application.email
-                and self.session_state.application.phone_number
-            ):
-                # Additional validation before creating candidate
-                name = self.session_state.application.full_name
-                email = self.session_state.application.email
-                
-                # Validate name completeness (should have at least first and last name)
-                name_parts = name.split() if name else []
-                if len(name_parts) < 2:
-                    logger.warning(f"Name appears incomplete: '{name}' (only {len(name_parts)} part(s)). Agent should collect full name.")
-                
-                # Validate email format
-                email_pattern = r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}$"
-                if not re.match(email_pattern, email):
-                    logger.warning(f"Email format invalid: '{email}'. Agent should validate email during conversation.")
-                
-                candidate_id = self._create_candidate_on_conclude(fit_score, profile_summary, pdf_path)
-            else:
-                logger.warning("Candidate will not be created on conclude: missing name, email, or phone")
-                if candidate_id:
-                    logger.info(f"Session conclude - Candidate created: {candidate_id}")
+            # Only create candidate if one doesn't already exist
+            if not candidate_id:
+                # Finally, attempt to create candidate if all required fields are present
+                if (
+                    self.session_state.application
+                    and not self._candidate_created
+                    and self.session_state.application.full_name
+                    and self.session_state.application.email
+                    and self.session_state.application.phone_number
+                ):
+                    # Additional validation before creating candidate
+                    name = self.session_state.application.full_name
+                    email = self.session_state.application.email
+                    
+                    # Validate name completeness (should have at least first and last name)
+                    name_parts = name.split() if name else []
+                    if len(name_parts) < 2:
+                        logger.warning(f"Name appears incomplete: '{name}' (only {len(name_parts)} part(s)). Agent should collect full name.")
+                    
+                    # Validate email format
+                    email_pattern = r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}$"
+                    if not re.match(email_pattern, email):
+                        logger.warning(f"Email format invalid: '{email}'. Agent should validate email during conversation.")
+                    
+                    candidate_id = self._create_candidate_on_conclude(fit_score, profile_summary, pdf_path)
+                    if candidate_id:
+                        logger.info(f"Session conclude - Candidate created: {candidate_id}")
+                else:
+                    logger.warning("Candidate will not be created on conclude: missing name, email, or phone")
             
             # Step 3: Update session in Xano
             if xano_session_id:
@@ -741,6 +869,9 @@ class AgentToolkit:
             self.session_state.application.phone_number = phone_number.strip()
             logger.info(f"Phone number saved: {phone_number}")
             
+            # Persist to Xano immediately
+            self._sync_application_data_to_xano()
+            
             return f"✓ Phone number saved: {phone_number}"
             
         except Exception as e:
@@ -768,6 +899,9 @@ class AgentToolkit:
             self.session_state.application.email = email.strip().lower()
             logger.info(f"Email saved: {email}")
             
+            # Persist to Xano immediately
+            self._sync_application_data_to_xano()
+            
             return f"✓ Email saved: {email}"
             
         except Exception as e:
@@ -794,6 +928,9 @@ class AgentToolkit:
             # Save name with proper capitalization
             self.session_state.application.full_name = full_name.strip().title()
             logger.info(f"Name saved: {full_name}")
+            
+            # Persist to Xano immediately
+            self._sync_application_data_to_xano()
             
             return f"✓ Name saved: {full_name}"
             
@@ -896,13 +1033,18 @@ class AgentToolkit:
                     company_id = job_data['_related_company']['id']
                     logger.info(f"Retrieved company_id from job data: {company_id}")
             
-            # Sanitize phone number
+            # Sanitize phone number (preserve + sign if present)
             phone_clean = None
             if app.phone_number:
                 try:
-                    digits = ''.join(filter(str.isdigit, str(app.phone_number)))
+                    stripped = str(app.phone_number).strip()
+                    # Check if phone starts with +
+                    has_plus = stripped.startswith('+')
+                    # Extract only digits
+                    digits = ''.join(filter(str.isdigit, stripped))
                     if digits:
-                        phone_clean = digits
+                        # Add + sign back if it was present
+                        phone_clean = f"+{digits}" if has_plus else digits
                 except Exception:
                     phone_clean = None
             
@@ -975,20 +1117,23 @@ class AgentToolkit:
             if self.session_state.engagement:
                 xano_session_id = self.session_state.engagement.xano_session_id
             
-            # Patch candidate with complete data
+            # Ensure profile_summary is a string (should already be JSON string from report generator)
+            profile_summary_str = profile_summary if isinstance(profile_summary, str) else str(profile_summary)
+            
+            # Patch candidate with complete data (PDF upload handled internally)
             result = self.xano_client.patch_candidate_complete(
                 candidate_id=candidate_id,
                 score=fit_score,
                 report_pdf=pdf_path,
                 status="Short Listed",
-                profile_summary=profile_summary,
+                profile_summary=profile_summary_str,
                 session_id=xano_session_id
             )
             
             if result:
                 logger.info(f"Successfully patched candidate {candidate_id} with report (score: {fit_score})")
                 
-                # Delete local PDF after successful patch
+                # Delete local PDF after successful patch and upload
                 if pdf_path and os.path.exists(pdf_path):
                     try:
                         os.remove(pdf_path)
@@ -1053,6 +1198,65 @@ class AgentToolkit:
         except Exception as e:
             logger.error(f"Error updating candidate email: {e}")
             return f"✗ Error updating email: {str(e)}"
+
+    def update_candidate_phone(self, new_phone: str) -> str:
+        """
+        Update the candidate's phone number.
+        Use this when the user provides a corrected phone number.
+        
+        Args:
+            new_phone: The new phone number
+            
+        Returns:
+            Success message or error message
+        """
+        try:
+            # Clean phone number (preserve + sign if present, extract digits)
+            phone_clean = None
+            try:
+                stripped = new_phone.strip()
+                # Check if phone starts with +
+                has_plus = stripped.startswith('+')
+                # Extract only digits
+                digits = ''.join(filter(str.isdigit, str(stripped)))
+                if digits:
+                    # Add + sign back if it was present
+                    phone_clean = f"+{digits}" if has_plus else digits
+                else:
+                    return f"✗ Invalid phone number format: {new_phone}"
+            except Exception:
+                return f"✗ Invalid phone number format: {new_phone}"
+            
+            # Update in application state
+            if self.session_state.application:
+                self.session_state.application.phone_number = phone_clean
+                logger.info(f"Updated phone in application state: {phone_clean}")
+            
+            # If candidate already created, patch in Xano
+            if self.session_state.engagement and self.session_state.engagement.candidate_id:
+                candidate_id = self.session_state.engagement.candidate_id
+                
+                result = self.xano_client.patch_candidate_complete(
+                    candidate_id=candidate_id,
+                    phone=phone_clean
+                )
+                
+                if result:
+                    logger.info(f"Updated candidate {candidate_id} phone to: {new_phone}")
+                    # Reset phone verification since phone changed
+                    if self.session_state.verification:
+                        self.session_state.verification.phone_verified = False
+                        self.session_state.verification.phone_for_verification = None
+                    return f"✓ Phone number updated to: {new_phone}. Please verify the new phone number."
+                else:
+                    return "✗ Failed to update phone number in system"
+            else:
+                # Candidate not created yet, just update state
+                return f"✓ Phone number updated to: {new_phone}"
+                
+        except Exception as e:
+            logger.error(f"Error updating candidate phone: {e}")
+            return f"✗ Error updating phone: {str(e)}"
 
     def get_tools(self) -> List[StructuredTool]:
         """
@@ -1126,11 +1330,27 @@ class AgentToolkit:
                 ),
             ),
             StructuredTool.from_function(
+                func=self.update_candidate_phone,
+                name="update_candidate_phone",
+                description=(
+                    "Update the candidate's phone number if they provide a correction. "
+                    "Use this when the user says their phone was wrong or provides a different phone number. "
+                    "This updates both the application state and the candidate record in the system. "
+                    "Input: new_phone (the corrected phone number)"
+                ),
+            ),
+            StructuredTool.from_function(
                 func=self.send_email_verification_code,
                 name="send_email_verification_code",
                 description=(
-                    "Send email verification code to candidate. Call this after the candidate is created and you've asked if they're ready for email verification. "
-                    "The system will send a verification code to their email. "
+                    "Send email verification code to candidate. CRITICAL: Execute this tool SILENTLY WITHOUT ANY ANNOUNCEMENT. "
+                    "DO NOT say 'I'm sending the code' or 'Let me send you a code' BEFORE calling this tool. "
+                    "EXECUTION PATTERN: "
+                    "1. User confirms they're ready "
+                    "2. YOU IMMEDIATELY CALL THIS TOOL (no message to user) "
+                    "3. Tool executes and returns result "
+                    "4. ONLY THEN tell user the code was sent. "
+                    "The tool will send a verification code to their email and return a success/failure message. "
                     "Input: candidate's email address."
                 ),
             ),
@@ -1138,7 +1358,10 @@ class AgentToolkit:
                 func=self.validate_email_verification,
                 name="validate_email_verification",
                 description=(
-                    "Validate the email verification code provided by the user. Call this after user enters the code they received via email. "
+                    "Validate the email verification code provided by the user. "
+                    "CRITICAL: Call this tool SILENTLY - DO NOT say '[CALLING VALIDATE EMAIL]' or announce you're calling it. "
+                    "When user provides the code (typically a 6-digit number), immediately call this tool with the user_id and code. "
+                    "After tool returns, tell user if verification succeeded or failed. "
                     "Input: user_id (from email send response) and the 6-digit code user provided."
                 ),
             ),
@@ -1146,8 +1369,14 @@ class AgentToolkit:
                 func=self.send_phone_verification_code,
                 name="send_phone_verification_code",
                 description=(
-                    "Send phone verification code to candidate. Call this after the candidate is created and you've asked if they're ready for phone verification. "
-                    "The system will send a verification code to their phone. "
+                    "Send phone verification code to candidate. CRITICAL: Execute this tool SILENTLY WITHOUT ANY ANNOUNCEMENT. "
+                    "DO NOT say 'I'm sending the code' or 'The code has been sent' BEFORE calling this tool. "
+                    "EXECUTION PATTERN: "
+                    "1. User confirms they're ready (or says anything indicating readiness like 'sudre', 'yes', 'ok') "
+                    "2. YOU IMMEDIATELY CALL THIS TOOL (no message to user) "
+                    "3. Tool executes and returns result "
+                    "4. ONLY THEN tell user the code was sent. "
+                    "The tool will send a verification code to their phone and return a success/failure message. "
                     "Input: candidate's phone number."
                 ),
             ),
@@ -1155,7 +1384,11 @@ class AgentToolkit:
                 func=self.validate_phone_verification,
                 name="validate_phone_verification",
                 description=(
-                    "Validate the phone verification code provided by the user. Call this after user enters the code they received via phone. "
+                    "Validate the phone verification code provided by the user. "
+                    "CRITICAL: Call this tool SILENTLY - DO NOT say '[CALLING VALIDATE PHONE VERIFICATION]' or announce you're calling it. "
+                    "When user provides the code (typically a 6-digit number like '176053'), immediately call this tool with the user_id and code. "
+                    "After tool returns, tell user if verification succeeded or failed. "
+                    "EXAMPLE: User says '176053' → You call this tool silently → Tool returns result → You say 'Perfect! Your phone is verified!' "
                     "Input: user_id (from phone send response) and the 6-digit code user provided."
                 ),
             ),

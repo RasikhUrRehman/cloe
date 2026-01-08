@@ -8,20 +8,37 @@ def setup_logging():
     """Configure logging for the application"""
     # Remove default handler
     logger.remove()
-    # Add console handler
+    
+    # Add console handler with colors (for Docker logs and terminal)
+    # This goes to stderr and shows all levels
     logger.add(
         sys.stderr,
         format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
         level=settings.LOG_LEVEL,
+        colorize=True,
     )
-    # Add file handler
+    
+    # Add file handler for all logs
     logger.add(
         "logs/cleo_{time:YYYY-MM-DD}.log",
         rotation="00:00",
         retention="30 days",
         level=settings.LOG_LEVEL,
         format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}",
+        enqueue=True,  # Thread-safe
     )
+    
+    # Add error file handler for errors only
+    logger.add(
+        "logs/cleo_errors_{time:YYYY-MM-DD}.log",
+        rotation="00:00",
+        retention="30 days",
+        level="ERROR",
+        format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}\n{exception}",
+        backtrace=True,
+        diagnose=True,
+    )
+    
     return logger
 def generate_session_id() -> str:
     """Generate a unique session ID"""

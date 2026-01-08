@@ -744,14 +744,14 @@ class XanoClient:
     ) -> Optional[Dict[str, Any]]:
         """
         Patch/update candidate with complete information (CompletePatch endpoint)
-        Uses multipart/form-data with file upload, same as create_candidate
+        Automatically uploads PDF report if provided via upload_candidate_report_pdf()
         
         Args:
             candidate_id: Candidate ID to update
             name: Candidate name
             score: Fit score
             phone: Phone number
-            report_pdf: Path to report PDF file to upload
+            report_pdf: Path to report PDF file to upload (uploaded separately)
             status: Status
             session_id: Session ID
             profile_summary: Profile summary
@@ -760,92 +760,63 @@ class XanoClient:
         Returns:
             Updated candidate data if successful, None otherwise
         """
-        files = None  # Initialize files to avoid UnboundLocalError in finally
         try:
             url = f"{XANO_CANDIDATE_API_URL}/CompletePatch"
             
-            # If file is provided, use multipart/form-data (same as create_candidate)
-            if report_pdf and os.path.exists(report_pdf):
-                # Build form data - all fields as tuples for multipart
-                form_data = {
-                    'candidate_id': (None, str(candidate_id))
-                }
-                
-                # Add optional fields if provided
-                if name is not None:
-                    form_data['Name'] = (None, name)
-                if score is not None:
-                    form_data['Score'] = (None, str(int(score)))
-                if phone is not None:
-                    form_data['Phone'] = (None, phone)
-                if status is not None:
-                    form_data['Status'] = (None, status)
-                if session_id is not None:
-                    form_data['session_id'] = (None, str(session_id))
-                if profile_summary is not None:
-                    form_data['ProfileSummary'] = (None, profile_summary)
-                if my_session_id is not None:
-                    form_data['my_session_id'] = (None, my_session_id)
-                
-                # Handle file upload - use 'Report_pdf' as key (matching Xano field name)
-                import mimetypes
-                file_name = os.path.basename(report_pdf)
-                mime_type, _ = mimetypes.guess_type(report_pdf)
-                mime_type = mime_type or 'application/pdf'
-                files = {'Report_pdf': (file_name, open(report_pdf, 'rb'), mime_type)}
-                
-                logger.info(f"Patching candidate {candidate_id} with PDF file: {file_name}")
-                logger.info(f"URL: {url}")
-                logger.info(f"Form data: {form_data}")
-                
-                # Send PATCH request with multipart/form-data
-                response = requests.patch(
-                    url, 
-                    files={**form_data, **files},
-                    timeout=self.timeout
-                )
-            else:
-                # No file - use JSON payload
-                payload = {
-                    "candidate_id": candidate_id
-                }
-                
-                # Add optional fields if provided
-                if name is not None:
-                    payload["Name"] = name
-                if score is not None:
-                    payload["Score"] = score
-                if phone is not None:
-                    payload["Phone"] = phone
-                if status is not None:
-                    payload["Status"] = status
-                if session_id is not None:
-                    payload["session_id"] = session_id
-                if profile_summary is not None:
-                    payload["ProfileSummary"] = profile_summary
-                if my_session_id is not None:
-                    payload["my_session_id"] = my_session_id
-                
-                headers = {
-                    "accept": "application/json",
-                    "Content-Type": "application/json"
-                }
-                
-                logger.info(f"Patching candidate {candidate_id} without file")
-                logger.info(f"URL: {url}")
-                logger.info(f"Payload: {payload}")
-                
-                # Send PATCH request with JSON payload
-                response = requests.patch(
-                    url, 
-                    json=payload,
-                    headers=headers,
-                    timeout=self.timeout
-                )
+            # Use JSON payload (no file upload in patch)
+            payload = {
+                "candidate_id": candidate_id
+            }
+            
+            # Add optional fields if provided
+            if name is not None:
+                payload["Name"] = name
+            if score is not None:
+                payload["Score"] = score
+            if phone is not None:
+                payload["Phone"] = phone
+            if status is not None:
+                payload["Status"] = status
+            if session_id is not None:
+                payload["session_id"] = session_id
+            if profile_summary is not None:
+                payload["ProfileSummary"] = profile_summary
+            if my_session_id is not None:
+                payload["my_session_id"] = my_session_id
+            
+            headers = {
+                "accept": "application/json",
+                "Content-Type": "application/json"
+            }
+            
+            logger.info(f"Patching candidate {candidate_id}")
+            logger.info(f"URL: {url}")
+            logger.info(f"Payload: {payload}")
+            
+            # Send PATCH request with JSON payload
+            response = requests.patch(
+                url, 
+                json=payload,
+                headers=headers,
+                timeout=self.timeout
+            )
             
             response.raise_for_status()
             result = response.json()
             logger.info(f"Successfully patched candidate {candidate_id}")
+            
+            # Upload PDF report separately if provided
+            if report_pdf and os.path.exists(report_pdf):
+                logger.info(f"Uploading PDF report for candidate {candidate_id}")
+                upload_result = self.upload_candidate_report_pdf(
+                    candidate_id=candidate_id,
+                    report_pdf_path=report_pdf
+                )
+                if upload_result:
+                    logger.info(f"Successfully uploaded PDF report for candidate {candidate_id}")
+                else:
+                    logger.warning(f"Failed to upload PDF report for candidate {candidate_id}")
+            
             return result
             
         except requests.exceptions.RequestException as e:
@@ -856,11 +827,78 @@ class XanoClient:
         except Exception as e:
             logger.error(f"Unexpected error patching candidate: {e}")
             return None
+
+    def upload_candidate_report_pdf(
+        self,
+        candidate_id: int,
+        report_pdf_path: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Upload PDF report for a candidate using the update_file endpoint
+        
+        Args:
+            candidate_id: Candidate ID to upload report for
+            report_pdf_path: Path to the PDF file to upload
+            
+        Returns:
+            Response data if successful, None otherwise
+        """
+        file_handle = None
+        try:
+            if not os.path.exists(report_pdf_path):
+                logger.error(f"PDF file not found: {report_pdf_path}")
+                return None
+            
+            url = f"{XANO_CANDIDATE_API_URL}/update_file"
+            
+            # Prepare the file for upload
+            import mimetypes
+            file_name = os.path.basename(report_pdf_path)
+            mime_type, _ = mimetypes.guess_type(report_pdf_path)
+            mime_type = mime_type or 'application/pdf'
+            
+            file_handle = open(report_pdf_path, 'rb')
+            
+            # Prepare multipart form data
+            files = {
+                'File': (file_name, file_handle, mime_type)
+            }
+            
+            data = {
+                'candidate_id': str(candidate_id)
+            }
+            
+            logger.info(f"Uploading PDF report for candidate {candidate_id}")
+            logger.info(f"URL: {url}")
+            logger.info(f"File: {file_name}")
+            
+            # Use PATCH method for update_file endpoint
+            response = requests.patch(
+                url,
+                files=files,
+                data=data,
+                headers={'Accept': 'application/json'},
+                timeout=self.timeout
+            )
+            
+            response.raise_for_status()
+            result = response.json()
+            logger.info(f"Successfully uploaded PDF report for candidate {candidate_id}")
+            return result
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error uploading PDF for candidate {candidate_id}: {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                logger.error(f"Response content: {e.response.text}")
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error uploading PDF: {e}")
+            return None
         finally:
             # Close file handle if opened
-            if files and 'Report_pdf' in files:
+            if file_handle:
                 try:
-                    files['Report_pdf'][1].close()
+                    file_handle.close()
                 except:
                     pass
 
