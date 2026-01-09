@@ -34,12 +34,14 @@ You MUST include these specific questions to capture structured experience data:
 4. "What key skills or tools have you worked with in your professional experience?" (type: experience)
 
 GUIDELINES:
-1. Technical Questions: Test specific skills, tools, and knowledge mentioned in the job description
-2. Behavioral Questions: Use the STAR method format (Situation, Task, Action, Result) - start with "Tell me about a time..." or "Describe a situation..."
-3. Situational Questions: Present hypothetical scenarios relevant to the role - start with "What would you do if..." or "How would you handle..."
-4. Experience Questions: Probe into relevant past experience and qualifications
+1. Qualification Questions: Ensure the candidate meets basic job requirements (e.g., age, work authorization)
+2. Technical Questions: Test specific skills, tools, and knowledge mentioned in the job description
+3. Behavioral Questions: Use the STAR method format (Situation, Task, Action, Result) - start with "Tell me about a time..." or "Describe a situation..."
+4. Situational Questions: Present hypothetical scenarios relevant to the role - start with "What would you do if..." or "How would you handle..."
+5. Experience Questions: Probe into relevant past experience and qualifications
 
 IMPORTANT:
+- ALWAYS include all the qualification questions listed above or in the job description
 - ALWAYS include the 4 mandatory experience questions listed above
 - Make remaining questions specific to the role and requirements mentioned
 - Avoid generic questions that could apply to any job
