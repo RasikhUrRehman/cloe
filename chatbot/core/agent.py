@@ -137,7 +137,7 @@ class CleoRAGAgent:
             agent=agent,
             tools=self.tools,
             memory=self.memory,
-            verbose=True,
+            verbose=True,  # Prevent tool execution details from being exposed
             max_iterations=15,  # Increased to allow multiple tool calls per turn
             handle_parsing_errors=True,
             callbacks=callbacks,
@@ -485,11 +485,16 @@ class CleoRAGAgent:
         Returns:
             List of message strings
         """
+        # First, clean the response of any tool-related text or thinking
+        response = self._filter_tool_artifacts(response)
+        
         # Check if response contains the multi-message separator
         separator = "[NEXT_MESSAGE]"
         if separator in response:
             # Split by separator and clean up whitespace
             messages = [msg.strip() for msg in response.split(separator) if msg.strip()]
+            # Filter each message for tool artifacts
+            messages = [self._filter_tool_artifacts(msg) for msg in messages]
             logger.info(f"Split response into {len(messages)} messages using separator")
             return messages
         else:
@@ -503,6 +508,46 @@ class CleoRAGAgent:
             else:
                 # Return single message as a list
                 return [response]
+    def _filter_tool_artifacts(self, response: str) -> str:
+        """
+        Remove any tool-related text, thinking, or system artifacts from the response
+        Args:
+            response: Agent's response text
+        Returns:
+            Cleaned response text
+        """
+        import re
+        
+        # Remove common tool-related artifacts
+        patterns_to_remove = [
+            r"\[RESULT AFTER TOOL CALL\]",
+            r"\[RESULT[^\]]+\]",
+            r"\[CALLING [^\]]+\]",
+            r"\[TOOL_[^\]]+\]",
+            r"\[THINKING[^\]]*\]",
+            r"\[INTERNAL[^\]]*\]",
+            r"\[DEBUG[^\]]*\]",
+            r"I'm calling.*?tool",
+            r"Let me call.*?tool",
+            r"I'll use.*?tool",
+            r"I will call.*?tool",
+            r"Calling tool:.*?\n",
+            r"Tool result:.*?\n",
+        ]
+        
+        cleaned_response = response
+        for pattern in patterns_to_remove:
+            cleaned_response = re.sub(pattern, "", cleaned_response, flags=re.IGNORECASE)
+        
+        # Remove any bracketed system messages that might have leaked
+        cleaned_response = re.sub(r"\[SYSTEM[^\]]*\].*?(?=\n|$)", "", cleaned_response, flags=re.IGNORECASE)
+        
+        # Clean up any multiple spaces or newlines created by removal
+        cleaned_response = re.sub(r"\s+", " ", cleaned_response)
+        cleaned_response = re.sub(r"\n\s*\n\s*\n+", "\n\n", cleaned_response)
+        
+        return cleaned_response.strip()
+    
     def _detect_natural_breaks(self, response: str) -> List[str]:
         """
         Intelligently detect natural conversation breaks in a response

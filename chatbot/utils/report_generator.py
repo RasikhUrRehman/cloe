@@ -211,13 +211,25 @@ Return ONLY valid JSON in this exact structure:
     ],
     "overall_qualified": true|false|null
   }},
-  "experience": {{
-    "years_experience": <number or null>,
-    "job_title": "<string or null>",
-    "previous_employer": "<string or null>",
-    "skills": "<comma-separated string or null>",
-    "relevant_experience": "<assessment of how well experience matches job requirements>"
-  }},
+  "experiences": [
+    {{
+      "years_experience": <number or null>,
+      "job_title": "<string or null>",
+      "employer": "<string or null>",
+      "duration": "<string or null, e.g., '2020-2023' or '2 years'>",
+      "skills": "<comma-separated string or null>",
+      "relevant_experience": "<assessment of how well experience matches job requirements>"
+    }}
+  ],
+  "education": [
+    {{
+      "degree": "<string or null, e.g., 'Bachelor of Science', 'High School Diploma'>",
+      "field_of_study": "<string or null, e.g., 'Computer Science', 'Business Administration'>",
+      "institution": "<string or null, e.g., 'University of XYZ'>",
+      "graduation_year": "<string or null, e.g., '2020'>",
+      "additional_details": "<string or null, any relevant details like GPA, honors, etc.>"
+    }}
+  ],
   "fit_score": {{
     "total_score": <number 0-100>,
     "qualification_score": <number 0-100>,
@@ -243,6 +255,8 @@ Rules:
 - If something is not mentioned → use null (not "Not provided")
 - Be accurate and conservative
 - For qualification.requirements: Analyze the job requirements and create dynamic criteria based on what's needed for this specific job (e.g., age requirements, licenses, certifications, shift availability, transportation, etc.)
+- For experiences: Extract ALL work experiences mentioned by the candidate. If multiple experiences are discussed, create separate entries for each. If only one experience is mentioned, the array should have one entry. If no experience is mentioned, use an empty array []
+- For education: Extract ALL educational qualifications mentioned by the candidate. Include degrees, certifications, diplomas, high school, college, university, etc. If multiple education entries are mentioned, create separate entries for each. If no education is mentioned, use an empty array []
 - For fit_score: Calculate based on how well the candidate matches the job requirements
   - qualification_score: Based on whether candidate meets the dynamic job-specific requirements
   - experience_score: Based on relevant experience and skills for this specific job
@@ -366,19 +380,63 @@ Rules:
         story.append(table)
         story.append(Spacer(1, 0.3 * inch))
 
-        # Experience
-        story.append(Paragraph("Experience", styles["Heading2"]))
-        exp = report_data["experience"]
-        if exp.get("years_experience") is not None:
-            story.append(Paragraph(f"<b>Years of Experience:</b> {str(exp['years_experience'])}", styles["Normal"]))
-        if exp.get("job_title"):
-            story.append(Paragraph(f"<b>Recent Role:</b> {str(exp['job_title'])}", styles["Normal"]))
-        if exp.get("previous_employer"):
-            story.append(Paragraph(f"<b>Previous Employer:</b> {str(exp['previous_employer'])}", styles["Normal"]))
-        if exp.get("skills"):
-            story.append(Paragraph(f"<b>Skills:</b> {str(exp['skills'])}", styles["Normal"]))
-        if exp.get("relevant_experience"):
-            story.append(Paragraph(f"<b>Relevance to Position:</b> {str(exp['relevant_experience'])}", styles["Normal"]))
+        # Experience (multiple experiences support)
+        story.append(Paragraph("Work Experience", styles["Heading2"]))
+        experiences = report_data.get("experiences", [])
+        
+        if experiences and len(experiences) > 0:
+            for idx, exp in enumerate(experiences):
+                # Add a sub-heading for each experience entry if there are multiple
+                if len(experiences) > 1:
+                    story.append(Paragraph(f"<b>Experience {idx + 1}:</b>", styles["Normal"]))
+                
+                if exp.get("years_experience") is not None:
+                    story.append(Paragraph(f"<b>Years of Experience:</b> {str(exp['years_experience'])}", styles["Normal"]))
+                if exp.get("job_title"):
+                    story.append(Paragraph(f"<b>Job Title:</b> {str(exp['job_title'])}", styles["Normal"]))
+                if exp.get("employer"):
+                    story.append(Paragraph(f"<b>Employer:</b> {str(exp['employer'])}", styles["Normal"]))
+                if exp.get("duration"):
+                    story.append(Paragraph(f"<b>Duration:</b> {str(exp['duration'])}", styles["Normal"]))
+                if exp.get("skills"):
+                    story.append(Paragraph(f"<b>Skills:</b> {str(exp['skills'])}", styles["Normal"]))
+                if exp.get("relevant_experience"):
+                    story.append(Paragraph(f"<b>Relevance to Position:</b> {str(exp['relevant_experience'])}", styles["Normal"]))
+                
+                # Add spacing between experience entries
+                if idx < len(experiences) - 1:
+                    story.append(Spacer(1, 0.15 * inch))
+        else:
+            story.append(Paragraph("No work experience information provided.", styles["Normal"]))
+
+        story.append(Spacer(1, 0.3 * inch))
+
+        # Education
+        story.append(Paragraph("Education", styles["Heading2"]))
+        education = report_data.get("education", [])
+        
+        if education and len(education) > 0:
+            for idx, edu in enumerate(education):
+                # Add a sub-heading for each education entry if there are multiple
+                if len(education) > 1:
+                    story.append(Paragraph(f"<b>Education {idx + 1}:</b>", styles["Normal"]))
+                
+                if edu.get("degree"):
+                    story.append(Paragraph(f"<b>Degree:</b> {str(edu['degree'])}", styles["Normal"]))
+                if edu.get("field_of_study"):
+                    story.append(Paragraph(f"<b>Field of Study:</b> {str(edu['field_of_study'])}", styles["Normal"]))
+                if edu.get("institution"):
+                    story.append(Paragraph(f"<b>Institution:</b> {str(edu['institution'])}", styles["Normal"]))
+                if edu.get("graduation_year"):
+                    story.append(Paragraph(f"<b>Graduation Year:</b> {str(edu['graduation_year'])}", styles["Normal"]))
+                if edu.get("additional_details"):
+                    story.append(Paragraph(f"<b>Additional Details:</b> {str(edu['additional_details'])}", styles["Normal"]))
+                
+                # Add spacing between education entries
+                if idx < len(education) - 1:
+                    story.append(Spacer(1, 0.15 * inch))
+        else:
+            story.append(Paragraph("No education information provided.", styles["Normal"]))
 
         story.append(Spacer(1, 0.3 * inch))
 

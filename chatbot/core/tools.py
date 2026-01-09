@@ -1343,13 +1343,16 @@ class AgentToolkit:
                 func=self.send_email_verification_code,
                 name="send_email_verification_code",
                 description=(
-                    "Send email verification code to candidate. CRITICAL: Execute this tool SILENTLY WITHOUT ANY ANNOUNCEMENT. "
-                    "DO NOT say 'I'm sending the code' or 'Let me send you a code' BEFORE calling this tool. "
+                    "Send email verification code to candidate. CRITICAL: Execute this tool COMPLETELY SILENTLY WITHOUT ANY ANNOUNCEMENT OR INDICATION TO THE USER. "
+                    "DO NOT say 'I'm sending the code', 'Let me send you a code', or '[RESULT AFTER TOOL CALL]' - NOTHING. "
+                    "DO NOT show [CALLING SEND_EMAIL_VERIFICATION_CODE] or any bracket text to the user. "
+                    "WHEN TO CALL THIS TOOL - Call IMMEDIATELY when user says ANY of these: "
+                    "'yes', 'sure', 'ok', 'okay', 'ready', 'go ahead', 'verify', 'send it', 'verify email', 'send code', 'send the code', or ANY phrase indicating readiness. "
                     "EXECUTION PATTERN: "
-                    "1. User confirms they're ready "
-                    "2. YOU IMMEDIATELY CALL THIS TOOL (no message to user) "
+                    "1. User indicates readiness (yes/ok/sure/ready/verify email/etc.) "
+                    "2. YOU IMMEDIATELY CALL THIS TOOL SILENTLY (absolutely no message to user during execution) "
                     "3. Tool executes and returns result "
-                    "4. ONLY THEN tell user the code was sent. "
+                    "4. ONLY AFTER the tool returns success, tell user the code was sent. "
                     "The tool will send a verification code to their email and return a success/failure message. "
                     "Input: candidate's email address."
                 ),
@@ -1359,9 +1362,10 @@ class AgentToolkit:
                 name="validate_email_verification",
                 description=(
                     "Validate the email verification code provided by the user. "
-                    "CRITICAL: Call this tool SILENTLY - DO NOT say '[CALLING VALIDATE EMAIL]' or announce you're calling it. "
-                    "When user provides the code (typically a 6-digit number), immediately call this tool with the user_id and code. "
-                    "After tool returns, tell user if verification succeeded or failed. "
+                    "CRITICAL: Call this tool COMPLETELY SILENTLY - DO NOT say '[CALLING VALIDATE EMAIL]', '[RESULT AFTER TOOL CALL]', or announce you're calling it. "
+                    "DO NOT show any bracket text or thinking to the user. "
+                    "When user provides the code (typically a 6-digit number), immediately call this tool with the user_id and code SILENTLY. "
+                    "After tool returns, respond to the user naturally about whether verification succeeded or failed. "
                     "Input: user_id (from email send response) and the 6-digit code user provided."
                 ),
             ),
@@ -1369,13 +1373,18 @@ class AgentToolkit:
                 func=self.send_phone_verification_code,
                 name="send_phone_verification_code",
                 description=(
-                    "Send phone verification code to candidate. CRITICAL: Execute this tool SILENTLY WITHOUT ANY ANNOUNCEMENT. "
-                    "DO NOT say 'I'm sending the code' or 'The code has been sent' BEFORE calling this tool. "
+                    "Send phone verification code to candidate. CRITICAL: Execute this tool COMPLETELY SILENTLY WITHOUT ANY ANNOUNCEMENT OR INDICATION TO THE USER. "
+                    "DO NOT say 'I'm sending the code', 'The code has been sent', '[RESULT AFTER TOOL CALL]', or show any bracket text BEFORE calling this tool. "
+                    "WHEN TO CALL THIS TOOL - Call IMMEDIATELY when user says ANY of these: "
+                    "'yes', 'sure', 'ok', 'okay', 'ready', 'go ahead', 'verify', 'send it', 'sudre', "
+                    "'verify phone', 'verify my phone', 'verify phone number', 'phone verification', "
+                    "'send code', 'send the code', 'verify again', 'resend', 'send again', 'verify phone number again', "
+                    "or ANY phrase indicating readiness or requesting phone verification. "
                     "EXECUTION PATTERN: "
-                    "1. User confirms they're ready (or says anything indicating readiness like 'sudre', 'yes', 'ok') "
-                    "2. YOU IMMEDIATELY CALL THIS TOOL (no message to user) "
+                    "1. User indicates readiness or requests verification (any of the above phrases) "
+                    "2. YOU IMMEDIATELY CALL THIS TOOL SILENTLY (absolutely no message to user during execution) "
                     "3. Tool executes and returns result "
-                    "4. ONLY THEN tell user the code was sent. "
+                    "4. ONLY AFTER the tool returns success, tell user the code was sent. "
                     "The tool will send a verification code to their phone and return a success/failure message. "
                     "Input: candidate's phone number."
                 ),
@@ -1385,10 +1394,11 @@ class AgentToolkit:
                 name="validate_phone_verification",
                 description=(
                     "Validate the phone verification code provided by the user. "
-                    "CRITICAL: Call this tool SILENTLY - DO NOT say '[CALLING VALIDATE PHONE VERIFICATION]' or announce you're calling it. "
-                    "When user provides the code (typically a 6-digit number like '176053'), immediately call this tool with the user_id and code. "
-                    "After tool returns, tell user if verification succeeded or failed. "
-                    "EXAMPLE: User says '176053' → You call this tool silently → Tool returns result → You say 'Perfect! Your phone is verified!' "
+                    "CRITICAL: Call this tool COMPLETELY SILENTLY - DO NOT say '[CALLING VALIDATE PHONE VERIFICATION]', '[RESULT AFTER TOOL CALL]', or announce you're calling it. "
+                    "DO NOT show any bracket text, thinking, or internal reasoning to the user. "
+                    "When user provides the code (typically a 6-digit number like '176053'), immediately call this tool with the user_id and code SILENTLY. "
+                    "After tool returns, respond naturally to tell user if verification succeeded or failed. "
+                    "EXAMPLE: User says '176053' → You call this tool silently (user sees nothing) → Tool returns result → You say 'Perfect! Your phone is verified!' "
                     "Input: user_id (from phone send response) and the 6-digit code user provided."
                 ),
             ),
