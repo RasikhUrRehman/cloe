@@ -98,21 +98,21 @@ async def create_session(request: SessionCreateRequest):
         # Fetch job details if job_id is provided
         job_details = None
         generated_questions = None
-        if request.job_id:
-            job_details = get_job_by_id(request.job_id)
-            print(job_details)
-            print("-----"*4)
-            if not job_details:
-                logger.warning(f"Job ID {request.job_id} not found")
-            else:
+        # if request.job_id:
+        #     job_details = get_job_by_id(request.job_id)
+        #     print(job_details)
+        #     print("-----"*4)
+        #     if not job_details:
+        #         logger.warning(f"Job ID {request.job_id} not found")
+        #     else:
 
                 
-                #Generate questions from job details
-                try:
-                    generated_questions = await generate_questions_from_job_details(job_details, num_questions=15)
-                    logger.info(f"Generated {len(generated_questions)} questions for job {request.job_id}")
-                except Exception as e:
-                    logger.warning(f"Failed to generate questions for job {request.job_id}: {e}")
+        #         #Generate questions from job details
+        #         try:
+        #             generated_questions = await generate_questions_from_job_details(job_details, num_questions=15)
+        #             logger.info(f"Generated {len(generated_questions)} questions for job {request.job_id}")
+        #         except Exception as e:
+        #             logger.warning(f"Failed to generate questions for job {request.job_id}: {e}")
 
         
         # Create agent with job_id in memory

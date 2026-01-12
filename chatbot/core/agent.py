@@ -113,6 +113,9 @@ class CleoRAGAgent:
         # Get tools from the toolkit (bound to this agent's session state)
         self.tools = self.toolkit.get_tools()
         self.agent = self._create_agent()
+        
+        # Track the last stage added to context to avoid repetition
+        self.last_context_stage = None
 
     def _create_agent(self) -> AgentExecutor:
         """Create the LangChain agent"""
@@ -310,7 +313,9 @@ class CleoRAGAgent:
                     {"input": enhanced_input},
                     config={"callbacks": callbacks} if callbacks else {},
                 )
-
+                logger.info("Agent invocation successful")
+                logger.info(f"Agent enhance input: {enhanced_input}")
+                
                 agent_response = response.get(
                     "output", "I'm sorry, I didn't understand that."
                 )
@@ -443,41 +448,229 @@ class CleoRAGAgent:
         if should_encourage:
             enhanced_input += "\n\n[SYSTEM REMINDER: This is a perfect opportunity to use [NEXT_MESSAGE] to acknowledge their response and ask the next question. Break your response into natural conversation parts.]"
         return enhanced_input
-    def _get_current_context_summary(self) -> str:
-        """Get a summary of what information has already been collected"""
-        context = "[CONTEXT - INFORMATION ALREADY COLLECTED]:\n"
-        # Engagement info
-        if self.session_state.engagement:
-            if self.session_state.engagement.consent_given:
-                context += "- User has given consent to proceed\n"
-        # Qualification info
-        if self.session_state.qualification:
+    def _get_stage_specific_subprompt(self) -> str:
+        """Get stage-specific subprompt with tool guidance and collection requirements"""
+        stage = self.session_state.current_stage
+        
+        if stage == ConversationStage.ENGAGEMENT:
+            return """[ENGAGEMENT STAGE INSTRUCTIONS]:
+- PRIMARY GOAL: Build rapport and obtain consent to proceed
+- REQUIRED INFORMATION: User consent to continue with application
+- AVAILABLE TOOLS: fetch_job_details (use if job context needed)
+- CONVERSATION STYLE: Warm, welcoming, conversational
+- NEXT STEP: Once consent obtained, move to QUALIFICATION stage
+"""
+        
+        elif stage == ConversationStage.QUALIFICATION:
+            subprompt = """[QUALIFICATION STAGE INSTRUCTIONS]:
+- PRIMARY GOAL: Collect essential qualification criteria
+- REQUIRED INFORMATION TO COLLECT:
+"""
+            # Add dynamic checklist based on what's already collected
             qual = self.session_state.qualification
-            if qual.age_confirmed:
-                context += "- Age confirmed (18+)\n"
-            if qual.work_authorization:
-                context += "- Work authorization confirmed\n"
-            if qual.shift_preference:
-                context += f"- Shift preference: {qual.shift_preference}\n"
-            if qual.availability_start:
-                context += f"- Availability start: {qual.availability_start}\n"
-            if qual.transportation:
-                context += "- Transportation confirmed\n"
-            if qual.hours_preference:
-                context += f"- Hours preference: {qual.hours_preference}\n"
-        # Application info
-        if self.session_state.application:
+            if qual:
+                
+                if not qual.work_authorization:
+                    subprompt += "  ☐ Work authorization\n"
+                else:
+                    subprompt += "  ✓ Work authorization\n"
+                    
+                if not qual.shift_preference:
+                    subprompt += "  ☐ Shift preference (morning/afternoon/evening/overnight)\n"
+                else:
+                    subprompt += f"  ✓ Shift preference: {qual.shift_preference}\n"
+                    
+                if not qual.availability_start:
+                    subprompt += "  ☐ Availability start date\n"
+                else:
+                    subprompt += "  ✓ Availability start date\n"
+                    
+                if not qual.transportation:
+                    subprompt += "  ☐ Transportation confirmation\n"
+                else:
+                    subprompt += "  ✓ Transportation\n"
+                    
+                if not qual.age_confirmed:
+                    subprompt += "  ☐ Age confirmation (18+)\n"
+                else:
+                    subprompt += "  ✓ Age confirmed\n"
+                    
+                if not qual.hours_preference:
+                    subprompt += "  ☐ Hours preference (full-time/part-time)\n"
+                else:
+                    subprompt += f"  ✓ Hours preference: {qual.hours_preference}\n"
+            else:
+                
+                subprompt += "  ☐ Work authorization\n"
+                subprompt += "  ☐ Shift preference\n"
+                subprompt += "  ☐ Availability start date\n"
+                subprompt += "  ☐ Transportation\n"
+                subprompt += "  ☐ Age confirmation (18+)\n"
+                subprompt += "  ☐ Hours preference\n"
+            
+            subprompt += """
+- CONVERSATION STYLE: Friendly but efficient, ask one question at a time
+- IMPORTANT: Do NOT ask for name, email, or phone during QUALIFICATION. These will be collected in APPLICATION stage.
+- NEXT STEP: Once all qualification info collected, move to APPLICATION stage
+"""
+            return subprompt
+        
+        elif stage == ConversationStage.APPLICATION:
+            subprompt = """[APPLICATION STAGE INSTRUCTIONS]:
+- PRIMARY GOAL: Collect applicant contact and experience information
+- REQUIRED INFORMATION TO COLLECT:
+"""
+            # Add dynamic checklist
             app = self.session_state.application
-            if app.full_name:
-                context += f"- Name: {app.full_name}\n"
-            if app.email:
-                context += f"- Email: {app.email}\n"
-            if app.phone_number:
-                context += f"- Phone: {app.phone_number}\n"
-            if app.years_experience is not None:
-                context += f"- Experience: {app.years_experience} years\n"
-        context += f"\n[CURRENT STAGE]: {self.session_state.current_stage.value}\n"
-        context += "[INSTRUCTION]: DO NOT ask for information that has already been collected. Move to the next needed information or proceed to the next stage if current stage is complete.\n"
+            if app:
+                subprompt += "\n Education: "
+        
+                if app.years_experience is None:
+                    subprompt += "  ☐ Years of experience\n"
+                else:
+                    subprompt += f"  ✓ Years of experience: {app.years_experience}\n"
+
+                if not app.full_name:
+                    subprompt += "  ☐ Full name (USE save_name TOOL)\n"
+                else:
+                    subprompt += f"  ✓ Full name: {app.full_name}\n"
+                    
+                if not app.email:
+                    subprompt += "  ☐ Email address (USE save_email TOOL)\n"
+                else:
+                    subprompt += f"  ✓ Email: {app.email}\n"
+                    
+                if not app.phone_number:
+                    subprompt += "  ☐ Phone number (USE save_phone_number TOOL)\n"
+                else:
+                    subprompt += f"  ✓ Phone: {app.phone_number}\n"
+                    
+            else:
+                subprompt += "  ☐ Years of experience\n"
+                subprompt += "  ☐ Education\n"
+                subprompt += "  ☐ Full name (USE save_name TOOL)\n"
+                subprompt += "  ☐ Email address (USE save_email TOOL)\n"
+                subprompt += "  ☐ Phone number (USE save_phone_number TOOL)\n"
+                
+            
+            subprompt += """- REQUIRED TOOLS: 
+  * save_name: MUST be called when user provides their name
+  * save_email: MUST be called when user provides their email
+  * save_phone_number: MUST be called when user provides their phone
+- CONVERSATION STYLE: Professional yet friendly, acknowledge each piece of information
+- NEXT STEP: Once all application info collected, create_candidate tool will be called automatically, then move to VERIFICATION stage
+"""
+            return subprompt
+        
+        elif stage == ConversationStage.VERIFICATION:
+            self.toolkit.send_email_verification_code(email=self.session_state.application.email)
+            return """[VERIFICATION STAGE INSTRUCTIONS]:
+- PRIMARY GOAL: Verify contact information and confirm submission
+- REQUIRED ACTIONS:
+  * Verify email address and phone number by sending confirmation code using tools
+  * Prompt user to provide received code
+  * Validate code using tool verify_code
+  * IF USER SAYS THEY DIDN'T RECEIVE CODE: IMMEDIATELY call send_email_verification_code or send_phone_verification_code tool again (don't just apologize - actually resend by calling the tool)
+  
+- AVAILABLE TOOLS: send_email_verification_code, send_phone_verification_code, validate_phone_verification, validate_email_verification
+- RESENDING CODES: If user says "didn't receive", "no code", "haven't gotten it", etc., call the send tool again immediately
+- CONVERSATION STYLE: Clear, confirmatory, reassuring
+- NEXT STEP: Once verified, move to COMPLETED stage
+"""
+        
+        elif stage == ConversationStage.COMPLETED:
+            return """[COMPLETED STAGE INSTRUCTIONS]:
+- PRIMARY GOAL: Provide closure and next steps
+- ACTIONS:
+  * Thank the candidate for their application
+  * Provide timeline for response
+  * Offer to answer any final questions
+- AVAILABLE TOOLS: patch_candidate_patch_candidate_with_report, conclude_session
+- CONVERSATION STYLE: Warm, appreciative, encouraging
+"""
+        
+        return ""
+    
+    def _get_current_context_summary(self) -> str:
+        """Get a summary of what information has already been collected, filtered by current stage"""
+        context = "[CONTEXT - INFORMATION ALREADY COLLECTED]:\n"
+        
+        current_stage = self.session_state.current_stage
+        
+        # ENGAGEMENT STAGE: Only show engagement info
+        if current_stage == ConversationStage.ENGAGEMENT:
+            if self.session_state.engagement:
+                if self.session_state.engagement.consent_given:
+                    context += "- User has given consent to proceed\n"
+        
+        # QUALIFICATION STAGE: Show engagement + qualification info
+        elif current_stage == ConversationStage.QUALIFICATION:
+            # Previous stage info (minimal)
+            if self.session_state.engagement and self.session_state.engagement.consent_given:
+                context += "- User has given consent to proceed\n"
+            
+            # Current stage info
+            if self.session_state.qualification:
+                qual = self.session_state.qualification
+                if qual.age_confirmed:
+                    context += "- Age confirmed (18+)\n"
+                if qual.work_authorization:
+                    context += "- Work authorization confirmed\n"
+                if qual.shift_preference:
+                    context += f"- Shift preference: {qual.shift_preference}\n"
+                if qual.availability_start:
+                    context += f"- Availability start: {qual.availability_start}\n"
+                if qual.transportation:
+                    context += "- Transportation confirmed\n"
+                if qual.hours_preference:
+                    context += f"- Hours preference: {qual.hours_preference}\n"
+        
+        # APPLICATION STAGE: Show only application info (and minimal previous context)
+        elif current_stage == ConversationStage.APPLICATION:
+            # Only include key qualifiers, not full details
+            if self.session_state.engagement and self.session_state.engagement.consent_given:
+                context += "- Qualified for application\n"
+            
+            # Current stage info (application)
+            if self.session_state.application:
+                app = self.session_state.application
+                if app.full_name:
+                    context += f"- Name: {app.full_name}\n"
+                if app.email:
+                    context += f"- Email: {app.email}\n"
+                if app.phone_number:
+                    context += f"- Phone: {app.phone_number}\n"
+                if app.years_experience is not None:
+                    context += f"- Experience: {app.years_experience} years\n"
+        
+        # VERIFICATION STAGE: Show application info only
+        elif current_stage == ConversationStage.VERIFICATION:
+            if self.session_state.application:
+                app = self.session_state.application
+                if app.full_name:
+                    context += f"- Name: {app.full_name}\n"
+                if app.email:
+                    context += f"- Email: {app.email}\n"
+                if app.phone_number:
+                    context += f"- Phone: {app.phone_number}\n"
+                if app.years_experience is not None:
+                    context += f"- Experience: {app.years_experience} years\n"
+        
+        # COMPLETION STAGE: Show minimal context
+        elif current_stage == ConversationStage.COMPLETED:
+            if self.session_state.application and self.session_state.application.full_name:
+                context += f"- Candidate: {self.session_state.application.full_name}\n"
+        
+        # Only add stage information if the stage has changed
+        if self.session_state.current_stage != self.last_context_stage:
+            context += f"\n[CURRENT STAGE]: {self.session_state.current_stage.value}\n"
+            
+            # Add stage-specific subprompt with tool guidance
+            context += "\n" + self._get_stage_specific_subprompt()
+            
+            # Update the tracked stage
+            self.last_context_stage = self.session_state.current_stage
+        
         return context
     def _split_multi_messages(self, response: str) -> List[str]:
         """

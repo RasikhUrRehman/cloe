@@ -10,6 +10,7 @@ import requests
 from typing import TYPE_CHECKING, List, Optional
 from langchain.tools import StructuredTool
 
+from chatbot.state.states import ConversationStage
 from chatbot.utils.utils import setup_logging
 from chatbot.utils.config import settings
 from langchain_openai import ChatOpenAI
@@ -560,11 +561,27 @@ class AgentToolkit:
                 else:
                     logger.warning("Candidate will not be created on conclude: missing name, email, or phone")
             
-            # Step 3: Update session in Xano
+            # Step 3: Transition to COMPLETED stage
+            from chatbot.state.states import ConversationStage
+            self.session_state.current_stage = ConversationStage.COMPLETED
+            
+            # Mark all stages as completed
+            if self.session_state.engagement:
+                self.session_state.engagement.stage_completed = True
+            if self.session_state.qualification:
+                self.session_state.qualification.stage_completed = True
+            if self.session_state.application:
+                self.session_state.application.stage_completed = True
+            if self.session_state.verification:
+                self.session_state.verification.stage_completed = True
+            
+            logger.info(f"Transitioned to COMPLETED stage and marked all stages as completed")
+            
+            # Step 4: Update session in Xano
             if xano_session_id:
                 update_data = {
                     "Status": final_status,
-                    "conversation_stage": "concluded",
+                    "conversation_stage": "completed",
                     "conclusion_reason": reason,
                 }
                 
@@ -573,6 +590,10 @@ class AgentToolkit:
                 
                 self.xano_client.update_session(xano_session_id, update_data)
                 logger.info(f"Session {xano_session_id} concluded with status: {final_status}, reason: {reason}")
+            
+            # Sync final state to Xano if agent is available
+            if self.agent:
+                self.agent.sync_session_state_to_xano()
             
             return f"Session concluded successfully. Status: {final_status}. Reason: {reason}"
             
@@ -666,11 +687,14 @@ class AgentToolkit:
                 from chatbot.state.states import VerificationState
                 self.session_state.verification = VerificationState(session_id=self.session_state.session_id)
             
+            self.session_state.current_stage = ConversationStage.VERIFICATION
             self.session_state.verification.email_verification_user_id = user_id
             self.session_state.verification.email_verification_code = email_code
             self.session_state.verification.email_for_verification = email
+            self.session_state.verification.verification_status = "pending"
             
             logger.info(f"Email verification code sent to {email}, user_id: {user_id}, candidate_id: {candidate_id}")
+            logger.info(f"VerificationState updated: email_verification_user_id={user_id}, verification_status=pending")
             return f"✓ Verification code sent to {email}. Please check your email and enter the code when ready."
             
         except requests.exceptions.RequestException as e:
@@ -721,11 +745,19 @@ class AgentToolkit:
                     from chatbot.state.states import VerificationState
                     self.session_state.verification = VerificationState(session_id=self.session_state.session_id)
                 
+                
+                self.session_state.current_stage = ConversationStage.VERIFICATION
                 self.session_state.verification.email_verified = True
+                self.session_state.verification.verification_status = "verified"
+                from chatbot.utils.utils import get_current_timestamp
+                self.session_state.verification.timestamp_verified = get_current_timestamp()
                 logger.info(f"Email verified successfully for user_id: {user_id}, candidate_id: {candidate_id}")
+                logger.info(f"VerificationState updated: email_verified=True, verification_status=verified")
+                self.send_phone_verification_code(phone=self.session_state.application.phone_number)
                 return "✓ Email verified successfully!"
             else:
                 logger.warning(f"Email verification failed for user_id: {user_id}")
+                self.session_state.verification.verification_status = "failed"
                 return "✗ Email verification failed. Please check the code and try again."
             
         except requests.exceptions.RequestException as e:
@@ -783,11 +815,16 @@ class AgentToolkit:
                 from chatbot.state.states import VerificationState
                 self.session_state.verification = VerificationState(session_id=self.session_state.session_id)
             
+            self.session_state.current_stage = ConversationStage.VERIFICATION
             self.session_state.verification.phone_verification_user_id = user_id
             self.session_state.verification.phone_verification_code = phone_code
             self.session_state.verification.phone_for_verification = phone
+            # Keep existing email verification status if present
+            if not self.session_state.verification.email_verified:
+                self.session_state.verification.verification_status = "pending"
             
             logger.info(f"Phone verification code sent, user_id: {user_id}, candidate_id: {candidate_id}")
+            logger.info(f"VerificationState updated: phone_verification_user_id={user_id}")
             return f"✓ Verification code sent to {phone}. Please enter the code when ready."
             
         except requests.exceptions.RequestException as e:
@@ -834,8 +871,20 @@ class AgentToolkit:
                     from chatbot.state.states import VerificationState
                     self.session_state.verification = VerificationState(session_id=self.session_state.session_id)
                 
+                self.session_state.current_stage = ConversationStage.COMPLETED
                 self.session_state.verification.phone_verified = True
+                
+                # Check if both email and phone are verified to complete verification stage
+                if self.session_state.verification.email_verified and self.session_state.verification.phone_verified:
+                    self.session_state.verification.stage_completed = True
+                    self.session_state.verification.verification_status = "verified"
+                    from chatbot.utils.utils import get_current_timestamp
+                    if not self.session_state.verification.timestamp_verified:
+                        self.session_state.verification.timestamp_verified = get_current_timestamp()
+                    logger.info(f"VERIFICATION stage completed: both email and phone verified")
+                
                 logger.info(f"Phone verified successfully for user_id: {user_id}, candidate_id: {candidate_id}")
+                logger.info(f"VerificationState updated: phone_verified=True")
                 return "✓ Phone verified successfully!"
             else:
                 logger.warning(f"Phone verification failed for user_id: {user_id}")
@@ -866,6 +915,7 @@ class AgentToolkit:
                 self.session_state.application = ApplicationState(session_id=self.session_state.session_id)
             
             # Save phone number
+            self.session_state.current_stage = ConversationStage.VERIFICATION
             self.session_state.application.phone_number = phone_number.strip()
             logger.info(f"Phone number saved: {phone_number}")
             
@@ -896,6 +946,7 @@ class AgentToolkit:
                 self.session_state.application = ApplicationState(session_id=self.session_state.session_id)
             
             # Save email (lowercase for consistency)
+            self.session_state.current_stage = ConversationStage.APPLICATION
             self.session_state.application.email = email.strip().lower()
             logger.info(f"Email saved: {email}")
             
@@ -919,7 +970,7 @@ class AgentToolkit:
             Success message confirming the name was saved
         """
         try:
-            from chatbot.state.states import ApplicationState
+            from chatbot.state.states import ApplicationState, ConversationStage
             
             # Ensure application state exists
             if not self.session_state.application:
@@ -949,7 +1000,7 @@ class AgentToolkit:
             Success message confirming the age was saved
         """
         try:
-            from chatbot.state.states import ApplicationState
+            from chatbot.state.states import ApplicationState, QualificationState
             
             # Ensure application state exists
             if not self.session_state.application:
@@ -958,6 +1009,12 @@ class AgentToolkit:
             # Save age
             self.session_state.application.age = age
             logger.info(f"Age saved: {age}")
+            
+            # Update qualification state to mark age as confirmed
+            if not self.session_state.qualification:
+                self.session_state.qualification = QualificationState(session_id=self.session_state.session_id)
+            self.session_state.qualification.age_confirmed = True
+            logger.info(f"Qualification state updated: age_confirmed=True")
             
             return f"✓ Age saved: {age}"
             
@@ -1069,6 +1126,9 @@ class AgentToolkit:
                 user_id = candidate.get('user_id')
                 self._candidate_created = True
                 
+                from chatbot.state.states import ConversationStage
+                self.session_state.current_stage = ConversationStage.APPLICATION
+                
                 # Store in engagement state
                 if self.session_state.engagement:
                     self.session_state.engagement.candidate_id = candidate_id
@@ -1079,6 +1139,21 @@ class AgentToolkit:
                     # Update session with candidate_id
                     if xano_session_id:
                         self.xano_client.update_session(xano_session_id, {"candidate_id": candidate_id})
+                
+                # Mark APPLICATION stage as completed and transition to VERIFICATION
+                from chatbot.state.states import ConversationStage
+                if self.session_state.application:
+                    self.session_state.application.stage_completed = True
+                    self.session_state.application.application_status = "submitted"
+                    logger.info(f"APPLICATION stage marked as completed")
+                
+                # Transition to VERIFICATION stage
+                self.session_state.current_stage = ConversationStage.VERIFICATION
+                logger.info(f"Transitioned to VERIFICATION stage after candidate creation")
+                
+                # Sync state to Xano if agent is available
+                if self.agent:
+                    self.agent.sync_session_state_to_xano()
                 
                 logger.info(f"Created candidate {candidate_id} early without report")
                 return f"✓ Candidate created successfully with ID: {candidate_id}"
