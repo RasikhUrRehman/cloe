@@ -310,6 +310,7 @@ class CleoRAGAgent:
                     {"input": enhanced_input},
                     config={"callbacks": callbacks} if callbacks else {},
                 )
+
                 agent_response = response.get(
                     "output", "I'm sorry, I didn't understand that."
                 )
