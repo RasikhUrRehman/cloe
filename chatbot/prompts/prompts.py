@@ -245,15 +245,15 @@ e. Application Completion Acknowledgment
 STEP 4 — Verification and Conclusion
 
 Purpose: Confirm information accuracy and conclude.
-1. After successfully saving email, CALL send_email_verification_code [SILENT]
+1. CALL TOOL send_email_verification_code [SILENT]
 2. THEN inform user: "A verification code has been sent to your email."
 3. Wait for user to provide the code
-4. When user provides code, IMMEDIATELY CALL validate_email_verification [SILENT]
+4. When user provides code, IMMEDIATELY CALL TOOL validate_email_verification [SILENT]
 5. Then respond with success/failure message
 
 Once email verification is complete, proceed to phone verification:
 
-1. After successfully saving phone, CALL TOOL send_phone_verification_code [SILENT]
+1. CALL TOOL send_phone_verification_code [SILENT]
 2. THEN inform user: "A verification code has been sent to your phone."
 3. Wait for user to provide the code
 4. When user provides code, IMMEDIATELY CALL TOOL validate_phone_verification [SILENT]
