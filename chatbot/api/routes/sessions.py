@@ -37,7 +37,8 @@ class SessionCreateResponse(BaseModel):
     """Response model for session creation"""
     session_id: str
     xano_session_id: Optional[int] = None
-    message: str
+    message: str  # For backward compatibility - first message
+    messages: Optional[List[str]] = None  # All split messages (new)
     current_stage: str
 
 
@@ -148,10 +149,17 @@ async def create_session(request: SessionCreateRequest):
 
         logger.info(f"Created new session: {session_id} for job: {request.job_id or 'N/A'}")
 
+        # Ensure initial_messages is always a list
+        if not initial_messages:
+            initial_messages = ["Hello! I'm Cleo, ready to help you!"]
+        elif not isinstance(initial_messages, list):
+            initial_messages = [initial_messages]
+        
         return SessionCreateResponse(
             session_id=session_id,
             xano_session_id=agent.session_state.engagement.xano_session_id if agent.session_state.engagement else None,
-            message=initial_messages[0] if initial_messages else "Hello! I'm Cleo, ready to help you!",
+            message=initial_messages[0],  # First message for backward compatibility
+            messages=initial_messages,  # All split messages
             current_stage=agent.session_state.current_stage.value,
         )
     except Exception as e:

@@ -330,6 +330,8 @@ class CleoRAGAgent:
                         break
             except Exception as e:
                 logger.error(f"Error on attempt {attempt + 1}: {e}")
+                import traceback
+                logger.error(f"Traceback on attempt {attempt + 1}: {traceback.format_exc()}")
                 if attempt < max_retries - 1:
                     continue
                 else:

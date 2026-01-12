@@ -479,12 +479,42 @@ async function handleStartConversation() {
             jobInfoSection.style.display = 'block';
         }
         
+        // Update chat header with job title
+        const chatHeaderTitle = document.getElementById('chatHeaderTitle');
+        if (selectedJobDetails && selectedJobDetails.job_title) {
+            chatHeaderTitle.textContent = selectedJobDetails.job_title;
+        } else {
+            chatHeaderTitle.textContent = 'General Application';
+        }
+        
         // Hide landing page and show chat
         landingPage.style.display = 'none';
         chatInterface.style.display = 'grid';
         
-        // Add Cleo's welcome message (it's already personalized from the API)
-        addMessage(sessionData.message, false);
+        // Add Cleo's welcome message(s) - handle both single string and split messages
+        if (sessionData.messages && Array.isArray(sessionData.messages) && sessionData.messages.length > 0) {
+            // Display split welcome messages with delays
+            console.log(`Displaying ${sessionData.messages.length} welcome message(s)`);
+            for (let i = 0; i < sessionData.messages.length; i++) {
+                if (i > 0) {
+                    showTypingIndicator();
+                    await new Promise(resolve => setTimeout(resolve, 800));
+                    hideTypingIndicator();
+                }
+                addMessage(sessionData.messages[i], false);
+                if (i < sessionData.messages.length - 1) {
+                    await new Promise(resolve => setTimeout(resolve, 400));
+                }
+            }
+        } else if (sessionData.message) {
+            // Fallback: single message from response
+            console.log('Displaying single welcome message');
+            addMessage(sessionData.message, false);
+        } else {
+            // Last resort fallback
+            console.warn('No welcome message received from API');
+            addMessage("Hi! I'm Cleo, ready to help you with your application.", false);
+        }
         
         // Start status updates
         startStatusUpdates();
@@ -525,52 +555,81 @@ async function handleSendMessage(e) {
         // Hide typing indicator before adding messages
         hideTypingIndicator();
         
-        // Add assistant response(s) - handle multiple messages
-        if (response.responses && Array.isArray(response.responses)) {
-            // Add multiple messages with slight delays for natural flow
-            for (let i = 0; i < response.responses.length; i++) {
-                // Show typing indicator before each message (except the first)
-                if (i > 0) {
-                    showTypingIndicator();
-                    await new Promise(resolve => setTimeout(resolve, 800)); // 800ms delay between messages
-                    hideTypingIndicator();
-                }
-                
-                addMessage(response.responses[i], false, response.timestamp);
-                
-                // Small delay after adding message for smooth scrolling
-                if (i < response.responses.length - 1) {
-                    await new Promise(resolve => setTimeout(resolve, 400));
-                }
-            }
-            
-            // Update session status based on current stage (status update only, no message posting)
-            if (xanoSessionId) {
-                const statusMap = {
-                    'engagement': 'Continue',
-                    'qualification': 'Continue',
-                    'application': 'Continue',
-                    'verification': 'Pending',
-                    'completed': 'Completed'
-                };
-                const xanoStatus = statusMap[response.current_stage] || 'Continue';
-                updateXanoSessionStatus(xanoSessionId, xanoStatus).catch(err => {
-                    console.warn('Failed to update Xano session status:', err);
-                });
-            }
-        } else {
-            // Fallback for backward compatibility (if API returns single response)
-            const messageText = response.response || response.responses[0] || "I'm sorry, I didn't get that.";
-            addMessage(messageText, false, response.timestamp);
+        // Validate response structure
+        if (!response) {
+            console.error('Received empty response from API');
+            addMessage("I'm sorry, I didn't get a response. Please try again.", false);
+            return;
         }
         
-        // Update session status
-        const status = await getSessionStatus();
-        updateSessionStatus(status);
+        // Add assistant response(s) - handle multiple messages with robust validation
+        let responsesArray = [];
+        
+        if (response.responses && Array.isArray(response.responses) && response.responses.length > 0) {
+            // Filter out empty or invalid responses
+            responsesArray = response.responses.filter(msg => {
+                return msg && typeof msg === 'string' && msg.trim().length > 0;
+            });
+            
+            if (responsesArray.length === 0) {
+                console.warn('All responses were empty or invalid');
+                responsesArray = ["I received your message but had trouble formulating a response. Please try again."];
+            }
+        } else if (response.response && typeof response.response === 'string') {
+            // Single response fallback
+            responsesArray = [response.response];
+        } else {
+            // Last resort fallback
+            console.warn('Invalid response structure:', response);
+            responsesArray = ["I'm sorry, I encountered an unexpected error. Please try again."];
+        }
+        
+        // Display all messages with natural delays
+        console.log(`Displaying ${responsesArray.length} response message(s)`);
+        for (let i = 0; i < responsesArray.length; i++) {
+            // Show typing indicator before each message (except the first)
+            if (i > 0) {
+                showTypingIndicator();
+                await new Promise(resolve => setTimeout(resolve, 800)); // 800ms delay between messages
+                hideTypingIndicator();
+            }
+            
+            addMessage(responsesArray[i], false, response.timestamp);
+            
+            // Small delay after adding message for smooth scrolling
+            if (i < responsesArray.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, 400));
+            }
+        }
+        
+        // Update session status based on current stage (status update only, no message posting)
+        if (xanoSessionId && response.current_stage) {
+            const statusMap = {
+                'engagement': 'Continue',
+                'qualification': 'Continue',
+                'application': 'Continue',
+                'verification': 'Pending',
+                'completed': 'Completed'
+            };
+            const xanoStatus = statusMap[response.current_stage] || 'Continue';
+            updateXanoSessionStatus(xanoSessionId, xanoStatus).catch(err => {
+                console.warn('Failed to update Xano session status:', err);
+            });
+        }
+        
+        // Update session status (wrapped in try-catch to prevent message flow interruption)
+        try {
+            const status = await getSessionStatus();
+            updateSessionStatus(status);
+        } catch (error) {
+            console.warn('Failed to update session status display:', error);
+            // Non-critical error - don't break the message flow
+        }
         
     } catch (error) {
         console.error('Error sending message:', error);
         hideTypingIndicator();
+        addMessage("I encountered an error processing your message. Please try again.", false);
         
     } finally {
         setInputEnabled(true);

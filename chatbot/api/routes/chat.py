@@ -40,15 +40,24 @@ def _validate_api_responses(responses: List[str]) -> List[str]:
     Returns:
         List of validated response messages
     """
+    logger.debug(f"Validating {len(responses) if responses else 0} responses")
+    
     if not responses or not isinstance(responses, list):
+        logger.warning(f"Invalid responses format: {type(responses)}")
         return [
             "I'm experiencing technical difficulties at the moment. "
             "An agent will connect with you soon to assist you further."
         ]
 
     validated = []
-    for response in responses:
+    for idx, response in enumerate(responses):
         if not response or not isinstance(response, str):
+            logger.warning(f"Response {idx} is invalid type or empty: {type(response)}")
+            continue
+
+        response_stripped = response.strip()
+        if len(response_stripped) < 5:
+            logger.debug(f"Response {idx} too short (< 5 chars), skipping")
             continue
 
         problematic_patterns = [
@@ -57,25 +66,27 @@ def _validate_api_responses(responses: List[str]) -> List[str]:
             "I'm sorry, I didn't understand that.",
         ]
 
-        response_lower = response.lower().strip()
-        if len(response_lower) < 5:
-            continue
-
+        response_lower = response_stripped.lower()
         is_problematic = any(
             pattern.lower() in response_lower
             for pattern in problematic_patterns
         )
 
         if not is_problematic:
-            validated.append(response)
+            logger.debug(f"Response {idx} validated successfully")
+            validated.append(response_stripped)
+        else:
+            logger.debug(f"Response {idx} contains problematic pattern")
 
     if not validated:
+        logger.warning("All responses filtered out, returning fallback")
         return [
             "I'm experiencing technical difficulties at the moment. "
             "An agent will connect with you soon to assist you further. "
             "Thank you for your patience."
         ]
 
+    logger.info(f"Validated {len(validated)} responses from {len(responses)} total")
     return validated
 
 
@@ -116,7 +127,10 @@ async def chat(request: ChatRequest):
         
         # Process message
         responses = agent.process_message(request.message)
+        logger.debug(f"Raw responses from agent: {responses}")
+        
         validated_responses = _validate_api_responses(responses)
+        logger.debug(f"Validated responses: {validated_responses}")
         
         # Post AI responses to Xano
         if agent.session_state.engagement and agent.session_state.engagement.xano_session_id:
@@ -139,6 +153,8 @@ async def chat(request: ChatRequest):
         )
     except Exception as e:
         logger.error(f"Error processing chat message: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return ChatResponse(
             session_id=request.session_id,
             responses=[
