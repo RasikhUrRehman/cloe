@@ -105,11 +105,9 @@ async def create_session(request: SessionCreateRequest):
             if not job_details:
                 logger.warning(f"Job ID {request.job_id} not found")
             else:
-
-                
                 #Generate questions from job details
                 try:
-                    generated_questions = await generate_questions_from_job_details(job_details, num_questions=15)
+                    generated_questions = await generate_questions_from_job_details(job_details, num_questions=10)
                     logger.info(f"Generated {len(generated_questions)} questions for job {request.job_id}")
                 except Exception as e:
                     logger.warning(f"Failed to generate questions for job {request.job_id}: {e}")

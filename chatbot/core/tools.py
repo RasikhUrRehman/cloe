@@ -438,25 +438,31 @@ class AgentToolkit:
                         score=fit_score,
                         profile_summary=profile_summary_str,
                         status="Short Listed",
+                        report_pdf=pdf_path,
                         session_id=self.session_state.engagement.xano_session_id if self.session_state.engagement else None
                     )
                     
                     if result:
                         logger.info(f"Successfully patched candidate {candidate_id} with report data (score: {fit_score:.2f})")
+                        try:
+                            os.remove(pdf_path)
+                            logger.info(f"Deleted local PDF report: {pdf_path}")
+                        except Exception as e:
+                            logger.warning(f"Failed to delete local PDF report {pdf_path}: {e}")
                         
                         # Upload PDF if available
-                        if pdf_path and os.path.exists(pdf_path):
-                            upload_result = self.xano_client.upload_candidate_report_pdf(candidate_id, pdf_path)
-                            if upload_result:
-                                logger.info(f"Successfully uploaded PDF report for candidate {candidate_id}")
-                                # Delete local PDF after successful upload
-                                try:
-                                    os.remove(pdf_path)
-                                    logger.info(f"Deleted local PDF report: {pdf_path}")
-                                except Exception as e:
-                                    logger.warning(f"Failed to delete local PDF report {pdf_path}: {e}")
-                            else:
-                                logger.warning(f"Failed to upload PDF report for candidate {candidate_id}")
+                        # if pdf_path and os.path.exists(pdf_path):
+                        #     upload_result = self.xano_client.upload_candidate_report_pdf(candidate_id, pdf_path)
+                        #     if upload_result:
+                        #         logger.info(f"Successfully uploaded PDF report for candidate {candidate_id}")
+                        #         # Delete local PDF after successful upload
+                        #         try:
+                        #             os.remove(pdf_path)
+                        #             logger.info(f"Deleted local PDF report: {pdf_path}")
+                        #         except Exception as e:
+                        #             logger.warning(f"Failed to delete local PDF report {pdf_path}: {e}")
+                        #     else:
+                        #         logger.warning(f"Failed to upload PDF report for candidate {candidate_id}")
                     else:
                         logger.warning(f"Failed to patch candidate {candidate_id} with report data")
                 except Exception as e:
@@ -613,6 +619,12 @@ class AgentToolkit:
         if self.session_state.engagement and self.session_state.engagement.candidate_id:
             logger.info(f"Candidate already exists: {self.session_state.engagement.candidate_id}")
             return self.session_state.engagement.candidate_id
+        
+        # Check if experience has been collected before allowing candidate creation
+        if self.session_state.application and not self.session_state.application.experience_collected:
+            logger.warning("Cannot create candidate: experience/education/skills information has not been collected yet")
+            logger.info("Agent should ask experience questions before proceeding to verification")
+            return None
         
         # Candidate doesn't exist, so create it now
         logger.info("Candidate not yet created. Creating candidate now before verification...")
@@ -1022,6 +1034,32 @@ class AgentToolkit:
             logger.error(f"Error saving age: {e}")
             return f"✗ Failed to save age. Please try again."
 
+    def mark_experience_collected(self) -> str:
+        """
+        Mark that experience/education/skills information has been collected.
+        This should be called AFTER the agent has asked at least 2 experience-related questions.
+        This flag is required before the agent can proceed to verification.
+        
+        Returns:
+            Success message confirming experience collection is marked
+        """
+        try:
+            from chatbot.state.states import ApplicationState
+            
+            # Ensure application state exists
+            if not self.session_state.application:
+                self.session_state.application = ApplicationState(session_id=self.session_state.session_id)
+            
+            # Mark experience as collected
+            self.session_state.application.experience_collected = True
+            logger.info("Experience/education/skills collection marked as complete")
+            
+            return "✓ Experience information collected and recorded"
+            
+        except Exception as e:
+            logger.error(f"Error marking experience collected: {e}")
+            return "✗ Failed to mark experience collection. Please try again."
+    
     def create_candidate_early(self) -> str:
         """
         Create candidate record immediately with basic information (name, email, phone, age).
@@ -1140,16 +1178,14 @@ class AgentToolkit:
                     if xano_session_id:
                         self.xano_client.update_session(xano_session_id, {"candidate_id": candidate_id})
                 
-                # Mark APPLICATION stage as completed and transition to VERIFICATION
-                from chatbot.state.states import ConversationStage
-                if self.session_state.application:
-                    self.session_state.application.stage_completed = True
-                    self.session_state.application.application_status = "submitted"
-                    logger.info(f"APPLICATION stage marked as completed")
+                # Mark APPLICATION stage as completed (but don't transition to VERIFICATION yet)
+                # from chatbot.state.states import ConversationStage
+                # if self.session_state.application:
+                #     self.session_state.application.stage_completed = True
+                #     self.session_state.application.application_status = "submitted"
+                #     logger.info(f"APPLICATION stage marked as completed")
                 
-                # Transition to VERIFICATION stage
-                self.session_state.current_stage = ConversationStage.VERIFICATION
-                logger.info(f"Transitioned to VERIFICATION stage after candidate creation")
+                # Note: Transition to VERIFICATION happens when send_email_verification_code is called
                 
                 # Sync state to Xano if agent is available
                 if self.agent:
@@ -1204,18 +1240,16 @@ class AgentToolkit:
                 profile_summary=profile_summary_str,
                 session_id=xano_session_id
             )
-            
+            if pdf_path and os.path.exists(pdf_path):
+                try:
+                    os.remove(pdf_path)
+                    logger.info(f"Deleted local PDF report: {pdf_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete local PDF: {e}")
+                    return f"Failed to delete local PDF: {e}"
+                
             if result:
                 logger.info(f"Successfully patched candidate {candidate_id} with report (score: {fit_score})")
-                
-                # Delete local PDF after successful patch and upload
-                if pdf_path and os.path.exists(pdf_path):
-                    try:
-                        os.remove(pdf_path)
-                        logger.info(f"Deleted local PDF report: {pdf_path}")
-                    except Exception as e:
-                        logger.warning(f"Failed to delete local PDF: {e}")
-                
                 return f"✓ Candidate report generated and updated (Fit Score: {fit_score:.0f}%)"
             else:
                 return "✗ Failed to update candidate with report"
@@ -1381,6 +1415,25 @@ class AgentToolkit:
                     "Save the candidate's age. Call this IMMEDIATELY when the user provides their age. "
                     "Extract the age from the user's message and call this tool. "
                     "Input: age (integer, e.g., 25, 30)"
+                ),
+            ),
+            StructuredTool.from_function(
+                func=self.mark_experience_collected,
+                name="mark_experience_collected",
+                description=(
+                    "Mark that experience/education/skills information has been collected. "
+                    "CRITICAL: Call this tool IMMEDIATELY after you have asked at least TWO questions about the candidate's: "
+                    "- Work experience (even if they say they have none) "
+                    "- Relevant skills "
+                    "- Education or training "
+                    "This tool MUST be called before proceeding to verification. "
+                    "The verification stage will not work unless this tool has been called. "
+                    "EXECUTION PATTERN: "
+                    "1. Ask experience question → Get answer "
+                    "2. Ask follow-up skill/education question → Get answer "
+                    "3. IMMEDIATELY call this tool [SILENT] "
+                    "4. Then acknowledge and proceed to verification "
+                    "NO INPUT REQUIRED - just call the tool when you've collected experience info."
                 ),
             ),
             StructuredTool.from_function(

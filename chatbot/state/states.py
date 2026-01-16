@@ -62,6 +62,7 @@ class ApplicationState(BaseModel):
     skills: Optional[str] = None  # Comma-separated
     references: Optional[str] = None
     communication_preference: Optional[str] = None
+    experience_collected: bool = False  # Track if experience/education/skills questions have been asked
     application_status: str = "in_progress"  # in_progress, submitted
     stage_completed: bool = False
     class Config:

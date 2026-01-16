@@ -518,12 +518,16 @@ class CleoRAGAgent:
         elif stage == ConversationStage.APPLICATION:
             subprompt = """[APPLICATION STAGE INSTRUCTIONS]:
 - PRIMARY GOAL: Collect applicant contact and experience information
+- You Must ask candidate about their experience and education after collecting contact info.
+- If candidate has no experience, ask about relevant skills.
+- If candidate provides insufficient detail, politely probe for some more information.
+
 - REQUIRED INFORMATION TO COLLECT:
 """
             # Add dynamic checklist
             app = self.session_state.application
             if app:
-                subprompt += "\n Education: "
+                subprompt += "\n Education: \n"
         
                 if app.years_experience is None:
                     subprompt += "  ☐ Years of experience\n"
@@ -553,12 +557,14 @@ class CleoRAGAgent:
                 subprompt += "  ☐ Phone number (USE save_phone_number TOOL)\n"
                 
             
-            subprompt += """- REQUIRED TOOLS: 
+            subprompt += """
+            
+            - REQUIRED TOOLS: 
   * save_name: MUST be called when user provides their name
   * save_email: MUST be called when user provides their email
   * save_phone_number: MUST be called when user provides their phone
 - CONVERSATION STYLE: Professional yet friendly, acknowledge each piece of information
-- NEXT STEP: Once all application info collected, create_candidate tool will be called automatically, then move to VERIFICATION stage
+- NEXT STEP: After experience questions are completed, call send_email_verification_code tool to start verification process
 """
             return subprompt
         
@@ -718,11 +724,13 @@ class CleoRAGAgent:
         patterns_to_remove = [
             r"\[RESULT AFTER TOOL CALL\]",
             r"\[RESULT[^\]]+\]",
+            r"\[SILENT[^\]]+\]",
             r"\[CALLING [^\]]+\]",
             r"\[TOOL_[^\]]+\]",
             r"\[THINKING[^\]]*\]",
             r"\[INTERNAL[^\]]*\]",
             r"\[DEBUG[^\]]*\]",
+            r"\[SILENT[^\]]*\]",
             r"I'm calling.*?tool",
             r"Let me call.*?tool",
             r"I'll use.*?tool",
@@ -949,29 +957,34 @@ class CleoRAGAgent:
                     state_changed = True
                     logger.info("Qualification completed - Moving to APPLICATION stage")
         # Application stage updates
-        elif self.session_state.current_stage == ConversationStage.APPLICATION:
-            if not self.session_state.application:
-                self.session_state.application = ApplicationState(
-                    session_id=self.session_state.session_id
-                )
-            app = self.session_state.application
+        # elif self.session_state.current_stage == ConversationStage.APPLICATION:
+        #     if not self.session_state.application:
+        #         self.session_state.application = ApplicationState(
+        #             session_id=self.session_state.session_id
+        #         )
+        #     app = self.session_state.application
             # Extract application information using simple patterns
-            if self._extract_application_info(user_message, app):
-                state_changed = True
-            # Check if application is complete and trigger candidate creation
-            if self._is_application_complete(app):
-                if not app.stage_completed:
-                    app.application_status = "submitted"
-                    app.stage_completed = True
-                    # Create candidate immediately upon application completion
-                    self._create_candidate_immediately()
-                    # Transition to verification stage to prompt for verification
-                    self.session_state.current_stage = ConversationStage.VERIFICATION
-                    self._update_xano_status(ConversationStage.VERIFICATION)
-                    state_changed = True
-                    logger.info(
-                        "Application completed - Candidate created - Moving to VERIFICATION stage for contact verification"
-                    )
+            # if self._extract_application_info(user_message, app):
+            #     state_changed = True
+            # Check if application is complete and transition appropriately
+            # if self._is_application_complete(app):
+            #     if not app.stage_completed:
+            #         app.application_status = "submitted"
+            #         app.stage_completed = True
+            #         # Create candidate immediately upon application completion
+            #         self._create_candidate_immediately()
+            #         # Transition to verification stage only if candidate has experience
+            #         if app.years_experience > 0:
+            #             self.session_state.current_stage = ConversationStage.VERIFICATION
+            #             self._update_xano_status(ConversationStage.VERIFICATION)
+            #             state_changed = True
+            #             logger.info(
+            #                 "Application completed with experience - Moving to VERIFICATION stage for contact verification"
+            #             )
+            #         else:
+            #             logger.info(
+            #                 "Application completed with no experience - Staying in APPLICATION stage to continue asking questions"
+            #             )
         # Verification stage updates
         elif self.session_state.current_stage == ConversationStage.VERIFICATION:
             if not self.session_state.verification:
@@ -1025,6 +1038,25 @@ class CleoRAGAgent:
                     logger.info(f"Years of experience captured: {app.years_experience}")
                     state_changed = True
                     break
+            
+            # Check for "no experience" patterns
+            if not state_changed:
+                no_exp_patterns = [
+                    r"no\s+experience",
+                    r"no\s+work\s+experience",
+                    r"zero\s+experience",
+                    r"none",
+                    r"no\s+prior\s+experience",
+                    r"fresh\s+graduate",
+                    r"new\s+graduate",
+                    r"entry\s+level",
+                    r"first\s+job",
+                    r"never\s+worked",
+                ]
+                if any(re.search(pattern, user_message.lower()) for pattern in no_exp_patterns):
+                    app.years_experience = 0.0
+                    logger.info("No experience detected, setting years_experience to 0")
+                    state_changed = True
         return state_changed
     def _is_application_complete(self, app: ApplicationState) -> bool:
         """Check if application stage is complete"""
@@ -1150,6 +1182,25 @@ class CleoRAGAgent:
                     logger.info(f"Years of experience captured: {app.years_experience}")
                     state_changed = True
                     break
+            
+            # Check for "no experience" patterns
+            if not state_changed:
+                no_exp_patterns = [
+                    r"no\s+experience",
+                    r"no\s+work\s+experience",
+                    r"zero\s+experience",
+                    r"none",
+                    r"no\s+prior\s+experience",
+                    r"fresh\s+graduate",
+                    r"new\s+graduate",
+                    r"entry\s+level",
+                    r"first\s+job",
+                    r"never\s+worked",
+                ]
+                if any(re.search(pattern, user_message.lower()) for pattern in no_exp_patterns):
+                    app.years_experience = 0.0
+                    logger.info("No experience detected, setting years_experience to 0")
+                    state_changed = True
         # Log state changes
         if state_changed:
             logger.info("Proactive information extraction completed")

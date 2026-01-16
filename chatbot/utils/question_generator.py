@@ -65,7 +65,7 @@ Generate the questions now:"""
 
 async def generate_questions_from_job_details(
     job_details: Dict[str, Any],
-    num_questions: int = 15,
+    num_questions: int = 10,
     question_types: Optional[List[str]] = None,
     difficulty_level: str = "mixed"
 ) -> List[Dict[str, str]]:
@@ -88,7 +88,7 @@ async def generate_questions_from_job_details(
             try:
                 xano_client = get_xano_client()
                 company_id = job_details["related_company"]
-                company_info = xano_client.get_company_by_id(company_id)
+                company_info = xano_client.get_company_by_id(company_id) #WTF
                 logger.info(f"Fetched company details for company_id: {company_id}")
             except Exception as e:
                 logger.warning(f"Failed to fetch company details: {e}")
