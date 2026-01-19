@@ -462,8 +462,52 @@ class CleoRAGAgent:
 """
         
         elif stage == ConversationStage.QUALIFICATION:
-            subprompt = """[QUALIFICATION STAGE INSTRUCTIONS]:
-- PRIMARY GOAL: Collect essential qualification criteria
+            # Get job-specific requirements for dynamic qualification questions
+            job_details = None
+            if self.session_state.engagement and self.session_state.engagement.job_details:
+                job_details = self.session_state.engagement.job_details
+            
+            # Extract job-specific information
+            age_requirement = "18 or older"  # Default
+            job_location = "the job location"  # Default
+            job_shift = "your preferred shift"  # Default
+            job_type = "full-time or part-time"  # Default
+            
+            if job_details:
+                # Age requirement
+                if job_details.get("Age_18_Above"):
+                    age_requirement = "18 or older"
+                elif job_details.get("Age_16_above"):
+                    age_requirement = "16 or older"
+                else:
+                    age_requirement = "meet the minimum age requirement"
+                
+                # Location - check multiple possible fields
+                if job_details.get("job_location"):
+                    job_location = job_details["job_location"]
+                elif job_details.get("_branch") and job_details["_branch"].get("location"):
+                    job_location = job_details["_branch"]["location"]
+                elif job_details.get("_related_company") and job_details["_related_company"].get("location"):
+                    job_location = job_details["_related_company"]["location"]
+                
+                # Shift type
+                if job_details.get("Shift"):
+                    job_shift = job_details["Shift"]
+                
+                # Job type
+                if job_details.get("job_type"):
+                    job_type = job_details["job_type"]
+                elif job_details.get("job_Type"):  # Handle alternate capitalization
+                    job_type = job_details["job_Type"]
+            
+            subprompt = f"""[QUALIFICATION STAGE INSTRUCTIONS]:
+- PRIMARY GOAL: Collect essential qualification criteria based on THIS SPECIFIC JOB
+- IMPORTANT: Use job-specific information when asking questions (not generic questions)
+- Job Age Requirement: {age_requirement}
+- Job Location: {job_location}
+- Job Shift: {job_shift}
+- Job Type: {job_type}
+
 - REQUIRED INFORMATION TO COLLECT:
 """
             # Add dynamic checklist based on what's already collected
@@ -471,73 +515,82 @@ class CleoRAGAgent:
             if qual:
                 
                 if not qual.work_authorization:
-                    subprompt += "  ☐ Work authorization\n"
+                    subprompt += "  ☐ Work authorization/permit (Ask: 'Are you legally authorized to work in the United States?')\n"
                 else:
-                    subprompt += "  ✓ Work authorization\n"
+                    subprompt += "  ✓ Work authorization/permit confirmed\n"
+                
+                if not qual.age_confirmed:
+                    subprompt += f"  ☐ Age requirement (Ask: 'Are you {age_requirement}?')\n"
+                else:
+                    subprompt += f"  ✓ Age requirement confirmed ({age_requirement})\n"
+                    
+                if not qual.transportation:
+                    subprompt += f"  ☐ Transportation (Ask: 'That job is located at {job_location}. Do you have reliable transportation?')\n"
+                else:
+                    subprompt += f"  ✓ Transportation confirmed (location: {job_location})\n"
                     
                 if not qual.shift_preference:
-                    subprompt += "  ☐ Shift preference (morning/afternoon/evening/overnight)\n"
+                    subprompt += f"  ☐ Shift availability (Ask about {job_shift} shift or their preferred shift)\n"
                 else:
                     subprompt += f"  ✓ Shift preference: {qual.shift_preference}\n"
                     
                 if not qual.availability_start:
-                    subprompt += "  ☐ Availability start date\n"
+                    subprompt += "  ☐ Availability start date (Ask: 'When can you start?')\n"
                 else:
-                    subprompt += "  ✓ Availability start date\n"
-                    
-                if not qual.transportation:
-                    subprompt += "  ☐ Transportation confirmation\n"
-                else:
-                    subprompt += "  ✓ Transportation\n"
-                    
-                if not qual.age_confirmed:
-                    subprompt += "  ☐ Age confirmation (18+)\n"
-                else:
-                    subprompt += "  ✓ Age confirmed\n"
+                    subprompt += f"  ✓ Availability start: {qual.availability_start}\n"
                     
                 if not qual.hours_preference:
-                    subprompt += "  ☐ Hours preference (full-time/part-time)\n"
+                    subprompt += f"  ☐ Hours preference (This is a {job_type} position. Ask if they're available for this schedule)\n"
                 else:
                     subprompt += f"  ✓ Hours preference: {qual.hours_preference}\n"
             else:
                 
-                subprompt += "  ☐ Work authorization\n"
-                subprompt += "  ☐ Shift preference\n"
-                subprompt += "  ☐ Availability start date\n"
-                subprompt += "  ☐ Transportation\n"
-                subprompt += "  ☐ Age confirmation (18+)\n"
-                subprompt += "  ☐ Hours preference\n"
+                subprompt += f"  ☐ Work authorization/permit\n"
+                subprompt += f"  ☐ Age requirement (Must be {age_requirement})\n"
+                subprompt += f"  ☐ Transportation (Ask: 'That job is located at {job_location}. Do you have reliable transportation?')\n"
+                subprompt += f"  ☐ Shift availability ({job_shift})\n"
+                subprompt += f"  ☐ Availability start date\n"
+                subprompt += f"  ☐ Hours preference ({job_type})\n"
             
             subprompt += """
 - CONVERSATION STYLE: Friendly but efficient, ask one question at a time
-- IMPORTANT: Do NOT ask for name, email, or phone during QUALIFICATION. These will be collected in APPLICATION stage.
+- IMPORTANT: Do NOT ask for name, email, phone, or EXACT AGE during QUALIFICATION. These will be collected in APPLICATION stage.
+- For age: Only confirm they meet the minimum requirement from job description
+- For transportation: Ask ONLY ONE question combining location and transportation: "That job is located at {location}. Do you have reliable transportation?"
+- For shift/hours: Reference the SPECIFIC shift and job type from the job description
 - NEXT STEP: Once all qualification info collected, move to APPLICATION stage
 """
             return subprompt
         
         elif stage == ConversationStage.APPLICATION:
             subprompt = """[APPLICATION STAGE INSTRUCTIONS]:
-- PRIMARY GOAL: Collect applicant contact and experience information
-- You Must ask candidate about their experience and education after collecting contact info.
-- If candidate has no experience, ask about relevant skills.
-- If candidate provides insufficient detail, politely probe for some more information.
+- PRIMARY GOAL: Collect ALL applicant information required to CREATE CANDIDATE in Xano database
+- CRITICAL: Candidate CANNOT be created without ALL experience, education, and skills information
+- COLLECTION ORDER: Full name → Exact age (numerical) → Email → Phone → THREE MANDATORY EXPERIENCE QUESTIONS
+- You MUST collect detailed answers for ALL THREE experience questions before creating candidate
+
+WHY THIS MATTERS: The information you collect here will be used to:
+1. Create a candidate record in the Xano database
+2. Calculate fit score based on their qualifications
+3. Generate a comprehensive eligibility report
+4. Match them to the job requirements
 
 - REQUIRED INFORMATION TO COLLECT:
 """
             # Add dynamic checklist
             app = self.session_state.application
             if app:
-                subprompt += "\n Education: \n"
-        
-                if app.years_experience is None:
-                    subprompt += "  ☐ Years of experience\n"
-                else:
-                    subprompt += f"  ✓ Years of experience: {app.years_experience}\n"
+                subprompt += "\n=== CONTACT INFORMATION ===\n"
 
                 if not app.full_name:
                     subprompt += "  ☐ Full name (USE save_name TOOL)\n"
                 else:
                     subprompt += f"  ✓ Full name: {app.full_name}\n"
+                
+                if app.age is None:
+                    subprompt += "  ☐ EXACT age in years (USE save_age TOOL) - Ask: 'How old are you?' or 'What's your age?'\n"
+                else:
+                    subprompt += f"  ✓ Exact age: {app.age}\n"
                     
                 if not app.email:
                     subprompt += "  ☐ Email address (USE save_email TOOL)\n"
@@ -548,23 +601,106 @@ class CleoRAGAgent:
                     subprompt += "  ☐ Phone number (USE save_phone_number TOOL)\n"
                 else:
                     subprompt += f"  ✓ Phone: {app.phone_number}\n"
+                
+                subprompt += "\n=== THREE MANDATORY EXPERIENCE QUESTIONS (REQUIRED FOR XANO CANDIDATE CREATION) ===\n"
+                subprompt += "⚠️  WITHOUT ALL THREE ANSWERS, CANDIDATE CANNOT BE CREATED IN DATABASE ⚠️\n\n"
+                
+                if app.years_experience is None:
+                    subprompt += "  ☐ QUESTION 1: Years of Work Experience\n"
+                    subprompt += "     - Ask: 'How many years of relevant work experience do you have?'\n"
+                    subprompt += "     - COLLECT: Numerical value (e.g., 2, 3.5, 0 if no experience)\n"
+                    subprompt += "     - If they say '2 years', extract the number 2\n"
+                    subprompt += "     - USE save_years_experience TOOL to save the value\n"
+                else:
+                    subprompt += f"  ✓ QUESTION 1: Years of Work Experience = {app.years_experience} years\n"
+                
+                # Check if experience description exists
+                has_experience_description = hasattr(app, 'experience_description') and app.experience_description
+                if not has_experience_description:
+                    subprompt += "\n  ☐ QUESTION 2: Detailed Experience Description\n"
+                    subprompt += "     - Ask: 'Can you describe your previous work experience and what you did in those roles?'\n"
+                    subprompt += "     - COLLECT: Detailed description of roles, responsibilities, and tasks\n"
+                    subprompt += "     - If no experience: Ask about volunteer work, internships, or related activities\n"
+                    subprompt += "     - PROBE for details if answer is too brief (need at least 2-3 sentences)\n"
+                    subprompt += "     - USE save_experience_description TOOL to save the description\n"
+                else:
+                    subprompt += "\n  ✓ QUESTION 2: Detailed Experience Description collected\n"
+                
+                # Check if education exists
+                has_education = hasattr(app, 'education') and app.education
+                # Check if skills exist
+                has_skills = hasattr(app, 'skills') and app.skills
+                
+                if not has_education or not has_skills:
+                    subprompt += "\n  ☐ QUESTION 3: Education AND Skills (MANDATORY - BOTH PARTS REQUIRED)\n"
+                    subprompt += "     ⚠️  YOU MUST ASK BOTH PARTS OF THIS QUESTION - EDUCATION AND SKILLS ⚠️\n"
+                    if not has_education:
+                        subprompt += "     - PART A - Education (MANDATORY): 'What is your educational background?'\n"
+                        subprompt += "       Examples: High School, GED, Associate Degree, Bachelor's Degree, Some College, etc.\n"
+                        subprompt += "       - COLLECT: Highest level of education completed\n"
+                        subprompt += "       - USE save_education TOOL to save the education level\n"
+                        subprompt += "       - DO NOT SKIP THIS - MUST BE COLLECTED\n"
+                    else:
+                        subprompt += f"     - PART A - Education: ✓ Collected = {app.education}\n"
+                    
+                    if not has_skills:
+                        subprompt += "     - PART B - Skills (MANDATORY): 'What relevant skills do you have for this position?'\n"
+                        subprompt += "       Examples: customer service, computer skills, communication, teamwork, etc.\n"
+                        subprompt += "       - COLLECT: Specific skills related to the job\n"
+                        subprompt += "       - USE save_skills TOOL to save the skills\n"
+                        subprompt += "       - PROBE if they say 'none' or give vague answer\n"
+                        subprompt += "       - DO NOT SKIP THIS - MUST BE COLLECTED\n"
+                    else:
+                        subprompt += f"     - PART B - Skills: ✓ Collected = {app.skills}\n"
+                else:
+                    subprompt += "\n  ✓ QUESTION 3: Education AND Skills both collected\n"
+                    subprompt += f"     - Education: {app.education}\n"
+                    subprompt += f"     - Skills: {app.skills}\n"
                     
             else:
-                subprompt += "  ☐ Years of experience\n"
-                subprompt += "  ☐ Education\n"
+                subprompt += "\n=== CONTACT INFORMATION ===\n"
                 subprompt += "  ☐ Full name (USE save_name TOOL)\n"
+                subprompt += "  ☐ EXACT age in years (USE save_age TOOL)\n"
                 subprompt += "  ☐ Email address (USE save_email TOOL)\n"
                 subprompt += "  ☐ Phone number (USE save_phone_number TOOL)\n"
+                subprompt += "\n=== THREE MANDATORY EXPERIENCE QUESTIONS (REQUIRED FOR XANO CANDIDATE CREATION) ===\n"
+                subprompt += "⚠️  WITHOUT ALL THREE ANSWERS, CANDIDATE CANNOT BE CREATED IN DATABASE ⚠️\n\n"
+                subprompt += "  ☐ QUESTION 1: Years of Work Experience (numerical value)\n"
+                subprompt += "  ☐ QUESTION 2: Detailed Experience Description (roles, responsibilities)\n"
+                subprompt += "  ☐ QUESTION 3: Education (highest level) AND Skills (job-relevant)\n"
                 
             
             subprompt += """
-            
-            - REQUIRED TOOLS: 
-  * save_name: MUST be called when user provides their name
-  * save_email: MUST be called when user provides their email
-  * save_phone_number: MUST be called when user provides their phone
-- CONVERSATION STYLE: Professional yet friendly, acknowledge each piece of information
-- NEXT STEP: After experience questions are completed, call send_email_verification_code tool to start verification process
+
+- CRITICAL INSTRUCTIONS FOR EXPERIENCE COLLECTION:
+  * ASK EACH QUESTION SEPARATELY - do not combine questions
+  * WAIT for user's answer before moving to next question
+  * EXTRACT AND REMEMBER the information from their answers
+  * If answer is too brief or vague, ask a follow-up question to get more detail
+  * For QUESTION 2: Need detailed description (at least 2-3 sentences about what they did)
+  * For QUESTION 3: Must get BOTH education AND skills (two separate pieces of information)
+
+- WHEN TO CREATE CANDIDATE:
+  * ✓ All contact info collected (name, age, email, phone)
+  * ✓ QUESTION 1 answered (years of experience stored)
+  * ✓ QUESTION 2 answered (detailed experience description stored)
+  * ✓ QUESTION 3 answered (education AND skills both stored)
+  * → ONLY THEN call create_candidate_early tool to save to Xano database
+
+- TOOLS TO USE:
+  * save_name: Call when user provides their name
+  * save_age: Call when user provides their age
+  * save_email: Call when user provides their email
+  * save_phone_number: Call when user provides their phone
+  * create_candidate_early: Call ONLY after ALL contact info AND ALL THREE experience questions have detailed answers
+  
+- CONVERSATION STYLE: 
+  * Professional yet friendly
+  * Acknowledge each answer
+  * Probe for details if answers are too brief
+  * Make it conversational, not like an interrogation
+
+- NEXT STEP: After candidate is successfully created in Xano database, move to VERIFICATION stage
 """
             return subprompt
         
@@ -618,16 +754,16 @@ class CleoRAGAgent:
             # Current stage info
             if self.session_state.qualification:
                 qual = self.session_state.qualification
-                if qual.age_confirmed:
-                    context += "- Age confirmed (18+)\n"
                 if qual.work_authorization:
-                    context += "- Work authorization confirmed\n"
+                    context += "- Work authorization/permit confirmed\n"
+                if qual.age_confirmed:
+                    context += "- Age requirement confirmed (meets minimum requirement)\n"
                 if qual.shift_preference:
                     context += f"- Shift preference: {qual.shift_preference}\n"
-                if qual.availability_start:
-                    context += f"- Availability start: {qual.availability_start}\n"
                 if qual.transportation:
                     context += "- Transportation confirmed\n"
+                if qual.availability_start:
+                    context += f"- Availability start: {qual.availability_start}\n"
                 if qual.hours_preference:
                     context += f"- Hours preference: {qual.hours_preference}\n"
         
@@ -642,6 +778,8 @@ class CleoRAGAgent:
                 app = self.session_state.application
                 if app.full_name:
                     context += f"- Name: {app.full_name}\n"
+                if app.age is not None:
+                    context += f"- Age: {app.age}\n"
                 if app.email:
                     context += f"- Email: {app.email}\n"
                 if app.phone_number:
@@ -655,6 +793,8 @@ class CleoRAGAgent:
                 app = self.session_state.application
                 if app.full_name:
                     context += f"- Name: {app.full_name}\n"
+                if app.age is not None:
+                    context += f"- Age: {app.age}\n"
                 if app.email:
                     context += f"- Email: {app.email}\n"
                 if app.phone_number:
@@ -890,6 +1030,7 @@ class CleoRAGAgent:
                     qual.work_authorization = True
                     state_changed = True
                     logger.info("Work authorization confirmed")
+            
             # Shift preference detection
             shift_keywords = [
                 "morning",
@@ -1004,11 +1145,11 @@ class CleoRAGAgent:
         """Check if qualification stage is complete"""
         return all(
             [
-                qual.age_confirmed,
                 qual.work_authorization,
+                qual.age_confirmed,
                 qual.shift_preference,
-                qual.availability_start,
                 qual.transportation,
+                qual.availability_start,
                 qual.hours_preference,
             ]
         )

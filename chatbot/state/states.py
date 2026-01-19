@@ -40,6 +40,7 @@ class QualificationState(BaseModel):
     session_id: str
     age_confirmed: Optional[bool] = None
     work_authorization: Optional[bool] = None
+    location: Optional[str] = None
     shift_preference: Optional[str] = None
     availability_start: Optional[str] = None
     transportation: Optional[bool] = None

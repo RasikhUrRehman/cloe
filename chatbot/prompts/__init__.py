@@ -1,9 +1,9 @@
 """
 Prompts configuration for Cleo RAG Agent
 """
-from chatbot.prompts.prompts import get_system_prompt, ConversationStage, get_language_prompt
+from chatbot.prompts.prompts import get_system_prompt, ConversationStage
+
 __all__ = [
     "get_system_prompt",
     "ConversationStage",
-    "get_language_prompt",
 ]
